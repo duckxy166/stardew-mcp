@@ -6,6 +6,7 @@ using System.Reflection.Emit;
 using HarmonyLib;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
+using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using StardewValley.BellsAndWhistles;
@@ -23,7 +24,8 @@ public static class SplitScreenLayout
 {
     private static IMonitor _monitor = null!;
 
-    public static bool Grid3 = true;
+    public static bool Grid3 = false; // 4 AI players now use the game's own 2x2 grid; kept for reference
+    public static bool LockP1Input = true;
     public static bool HidePausedBanner = true;
     public static bool HideJoinChat = true;
     public static bool HideCursor = true;
@@ -37,6 +39,10 @@ public static class SplitScreenLayout
         new(0.5f, 0f, 0.5f, 0.5f),
         new(0f, 0.5f, 0.5f, 0.5f),
     };
+
+    /// <summary>Info lines the game adds straight to the chat box (no chat key): hidden by exact text.</summary>
+    public static readonly string[] HiddenInfoStrings = { "Strings\\UI:Chat_StartingServer" };
+    private static HashSet<string>? _hiddenInfoText;
 
     private static string? _pausedText;
     private static bool _inAddPlayer;
@@ -54,6 +60,13 @@ public static class SplitScreenLayout
             postfix: new HarmonyMethod(typeof(SplitScreenLayout), nameof(GameRunnerDraw_Postfix)));
         if (which == "layout")
             return;
+        // SMAPI's SInputState.TrueUpdate reads the real devices through these base methods every tick.
+        h.Patch(AccessTools.Method(typeof(InputState), nameof(InputState.GetKeyboardState)),
+            postfix: new HarmonyMethod(typeof(SplitScreenLayout), nameof(Keyboard_Postfix)));
+        h.Patch(AccessTools.Method(typeof(InputState), nameof(InputState.GetMouseState)),
+            postfix: new HarmonyMethod(typeof(SplitScreenLayout), nameof(Mouse_Postfix)));
+        h.Patch(AccessTools.Method(typeof(InputState), nameof(InputState.GetGamePadState)),
+            postfix: new HarmonyMethod(typeof(SplitScreenLayout), nameof(GamePad_Postfix)));
         h.Patch(AccessTools.Method(typeof(Game1), nameof(Game1.drawMouseCursor)),
             prefix: new HarmonyMethod(typeof(SplitScreenLayout), nameof(DrawMouseCursor_Prefix)));
         h.Patch(AccessTools.Method(typeof(IClickableMenu), nameof(IClickableMenu.drawMouse)),
@@ -149,6 +162,27 @@ public static class SplitScreenLayout
         return i >= 0 && i < Grid.Length ? Grid[i] : original;
     }
 
+    // ------------------------------------------------------------------ physical input lock (screen 0)
+
+    /// <summary>Real keyboard/mouse/pad 1 only reach screen 0 (P1, the host): blank them so nobody at the PC moves P1 or unpauses the world.</summary>
+    private static bool Locked => LockP1Input && Context.ScreenId == 0;
+
+    private static void Keyboard_Postfix(ref KeyboardState __result)
+    {
+        if (Locked) __result = default;
+    }
+
+    private static void Mouse_Postfix(ref MouseState __result)
+    {
+        // Parked at the top-left corner of P1's screen: no clicks, no hover tooltips.
+        if (Locked) __result = new MouseState(0, 0, 0, ButtonState.Released, ButtonState.Released, ButtonState.Released, ButtonState.Released, ButtonState.Released);
+    }
+
+    private static void GamePad_Postfix(ref GamePadState __result)
+    {
+        if (Locked) __result = default;
+    }
+
     // ------------------------------------------------------------------ recording artefacts
 
     /// <summary>Skip the "Paused" scroll the game draws on every screen while the host has paused the world.</summary>
@@ -180,7 +214,15 @@ public static class SplitScreenLayout
     }
 
     /// <summary>"X (127.0.0.1) has joined" is added straight to the chat box inside Multiplayer.addPlayer.</summary>
-    private static bool AddInfoMessage_Prefix() => !(HideJoinChat && _inAddPlayer);
+    private static bool AddInfoMessage_Prefix(string message)
+    {
+        if (!HideJoinChat)
+            return true;
+        if (_inAddPlayer)
+            return false;
+        _hiddenInfoText ??= HiddenInfoStrings.Select(k => Game1.content.LoadString(k)).ToHashSet();
+        return !_hiddenInfoText.Contains(message); // e.g. "You are now hosting a multiplayer game."
+    }
 
     private static bool ChatInfo_Prefix(string messageKey) => !(HideJoinChat && HiddenChatKeys.Contains(messageKey));
 

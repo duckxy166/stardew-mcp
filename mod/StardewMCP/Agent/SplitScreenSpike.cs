@@ -274,9 +274,10 @@ public static class SplitScreenSpike
                     if (a.TryGetProperty("hidePaused", out var hp)) SplitScreenLayout.HidePausedBanner = hp.GetBoolean();
                     if (a.TryGetProperty("hideJoin", out var hj)) SplitScreenLayout.HideJoinChat = hj.GetBoolean();
                     if (a.TryGetProperty("hideCursor", out var hc)) SplitScreenLayout.HideCursor = hc.GetBoolean();
+                    if (a.TryGetProperty("lockP1", out var lk)) SplitScreenLayout.LockP1Input = lk.GetBoolean();
                 }
                 Game1.game1.Window_ClientSizeChanged(null, null);
-                return new { ok = true, SplitScreenLayout.Grid3, SplitScreenLayout.HidePausedBanner, SplitScreenLayout.HideJoinChat };
+                return new { ok = true, SplitScreenLayout.Grid3, SplitScreenLayout.HidePausedBanner, SplitScreenLayout.HideJoinChat, SplitScreenLayout.HideCursor, SplitScreenLayout.LockP1Input };
             }
 
             case "capture":
@@ -287,12 +288,57 @@ public static class SplitScreenSpike
                 return new { ok = true, pending = path };
             }
 
+            case "input":
+            {
+                var rawM = Microsoft.Xna.Framework.Input.Mouse.GetState();
+                var rawK = Microsoft.Xna.Framework.Input.Keyboard.GetState();
+                var gm = Game1.input.GetMouseState();
+                return new
+                {
+                    ok = true, screen = Context.ScreenId, locked = SplitScreenLayout.LockP1Input,
+                    rawMouse = new[] { rawM.X, rawM.Y }, rawKeys = rawK.GetPressedKeys().Select(k => k.ToString()).ToArray(),
+                    gameMouse = new[] { gm.X, gm.Y }, gameKeys = Game1.input.GetKeyboardState().GetPressedKeys().Select(k => k.ToString()).ToArray(),
+                    gameMouseXY = new[] { Game1.getMouseX(), Game1.getMouseY() },
+                    focused = Game1.game1.IsActive,
+                    p1 = new[] { (int)Game1.player.Position.X, (int)Game1.player.Position.Y },
+                    paused = Game1.HostPaused,
+                };
+            }
+
             case "capture_status":
                 return new { ok = true, last = SplitScreenLayout.LastCapture };
 
             case "chat_clear":
                 GameRunner.instance.ExecuteForInstances(_ => Game1.chatBox?.messages.Clear());
                 return new { ok = true };
+
+            case "fullscreen":
+            {
+                // Exclusive fullscreen at a given mode (e.g. a DLDSR one). Sets options directly, so
+                // startup_preferences is not written (Options.setWindowedOption would save it).
+                Game1.options.preferredResolutionX = I(a, "w", 2560);
+                Game1.options.preferredResolutionY = I(a, "h", 1440);
+                Game1.options.fullscreen = true;
+                Game1.options.windowedBorderlessFullscreen = false;
+                Game1.toggleNonBorderlessWindowedFullscreen();
+                return new { ok = true, Game1.graphics.IsFullScreen, Game1.graphics.HardwareModeSwitch, backBuffer = new[] { Game1.graphics.PreferredBackBufferWidth, Game1.graphics.PreferredBackBufferHeight } };
+            }
+
+            case "borderless":
+            {
+                Game1.options.preferredResolutionX = 1920;
+                Game1.options.preferredResolutionY = 1080;
+                Game1.options.fullscreen = false;
+                Game1.options.windowedBorderlessFullscreen = true;
+                Game1.toggleFullscreen();
+                return new { ok = true, Game1.graphics.IsFullScreen, Game1.graphics.HardwareModeSwitch, backBuffer = new[] { Game1.graphics.PreferredBackBufferWidth, Game1.graphics.PreferredBackBufferHeight } };
+            }
+
+            case "focus":
+            {
+                var w = Game1.game1.Window;
+                return new { ok = true, active = GameRunner.instance.IsActive, client = new[] { w.ClientBounds.Width, w.ClientBounds.Height }, Game1.graphics.IsFullScreen, Game1.graphics.HardwareModeSwitch };
+            }
 
             case "nosleep":
                 // MonoGame sleeps 20 ms per frame while the window is unfocused (OBS/terminal in front).
