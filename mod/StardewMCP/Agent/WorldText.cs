@@ -105,7 +105,8 @@ public static class WorldText
             var it = p.Items[i];
             if (it == null) continue;
             var extra = it is SObject o && o.Edibility > -300 ? $", edible +{o.staminaRecoveredOnConsumption()} energy" : "";
-            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{extra}]");
+            var quality = it is not Tool && it.Quality > 0 ? $", {AgentTools.QualityName(it.Quality)}" : "";
+            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{quality}{extra}]");
         }
         return sb.ToString().TrimEnd();
     }

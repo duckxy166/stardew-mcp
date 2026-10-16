@@ -93,6 +93,7 @@ public static class DebugApi
         catch (Exception ex) { c.Fail($"Cannot create {id}: {ex.Message}"); yield break; }
         if (item == null) { c.Fail($"Cannot create {id}"); yield break; }
 
+        if (Has(a, "quality")) item.Quality = Math.Clamp(I(a, "quality", 0), 0, 4);
         if (!Game1.player.addItemToInventoryBool(item)) { c.Fail("Inventory is full"); yield break; }
         c.Result = $"Added {qty} x {item.DisplayName}";
         yield break;

@@ -23,7 +23,7 @@ public static partial class AgentTools
         Name = "menu",
         Description = "Read or use the open menu: chests, fridge, shipping bin, fishing treasure, mine elevator, jukebox, number and name entry, and any other menu by its buttons. " +
                       "menu() shows what it holds and which actions work (game time stays frozen). menu(action=...) clicks it like a player: " +
-                      "take / put an item between it and your inventory (count: default the whole stack), choose an option (a mine floor, a song), " +
+                      "take / put an item between it and your inventory (count: default the whole stack; quality: only that quality), choose an option (a mine floor, a song), " +
                       "amount types a number and presses OK (e.g. money to send), type enters a name and presses OK, ok, cancel, " +
                       "click presses a button that menu() lists by its label.",
         Schema = Obj(new
@@ -31,6 +31,7 @@ public static partial class AgentTools
             action = new { type = "string", @enum = new[] { "take", "put", "choose", "amount", "type", "ok", "cancel", "click" }, description = "Omit to read the menu" },
             item = Str("take/put: item name"),
             count = Int("take/put: how many (default: the whole stack)"),
+            quality = Str("take/put: only this quality: normal, silver, gold or iridium"),
             option = Str("choose: an option as menu() lists it, e.g. mine floor \"25\"; click: a button label"),
             value = Int("amount: the number to enter"),
             text = Str("type: the text to enter, e.g. a name"),
@@ -228,7 +229,7 @@ public static partial class AgentTools
         }
         if (!g.showReceivingMenu) { c.Fail($"Nothing can be taken from {MenuName(g)}."); yield break; }
 
-        int i = FindIn(g.ItemsToGrabMenu.actualInventory, name);
+        int i = FindIn(g.ItemsToGrabMenu.actualInventory, name, QualityIs(a));
         if (i < 0) { c.Fail($"No \"{name}\" in {MenuName(g)}. Inside: {Names(g.ItemsToGrabMenu.actualInventory)}"); yield break; }
         var item = g.ItemsToGrabMenu.actualInventory[i];
         int count = Has(a, "count") ? Math.Clamp(I(a, "count", item.Stack), 1, item.Stack) : item.Stack;
@@ -254,7 +255,7 @@ public static partial class AgentTools
     {
         if (g.behaviorFunction == null) { c.Fail($"Nothing can be put into {MenuName(g)}; take items or press ok."); yield break; }
         var name = S(a, "item");
-        int slot = FindItem(name);
+        int slot = FindItem(name, QualityIs(a));
         if (slot < 0) { c.Fail($"No \"{name}\" in your inventory."); yield break; }
         var item = P.Items[slot];
         if (!g.inventory.highlightMethod(item)) { c.Fail($"{item.DisplayName} can't go into {MenuName(g)}."); yield break; }

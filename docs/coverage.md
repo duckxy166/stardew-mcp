@@ -15,7 +15,7 @@ Every system behind that handler is then covered without new code.
 |---|---|---|---|---|
 | Move | WASD | `walk_to`, `travel_to` | pathfinder, warps, doors | ✅ |
 | Action button | right-click | `interact(x, y, holding?)` | `Game1.pressActionButton`: the held item's use action or eating, else `tryToCheckAt` → `GameLocation.checkAction` | ✅ `holding` picks the item; handlers that wait for a fresh press (`didPlayerJustRightClick`: chests, shipping bin, fish ponds) see it |
-| Use button | left-click | `use_tool`, `plant` | `Farmer.BeginUsingTool`, `Utility.tryToPlaceItem` | 🟡 places only on tilled soil |
+| Use button | left-click | `use_tool`, `plant`, `place` | `Farmer.BeginUsingTool`, `Utility.tryToPlaceItem` | 🟡 `place` puts items on free ground (smoke `place`, not yet run in game); `plant` only on tilled soil |
 | Dialogue answer | click an option | `respond(option)` | `DialogueBox` → `answerDialogueAction` or the question's callback | ✅ |
 | Menu | click, type | `menu`; `shop_list`, `buy`, `close_menu` | the menu's own click and handler methods | 🟡 reader, fallback, `take`/`put`, `choose`, `amount`, `type`, `ok`/`cancel`; `buy`/`sell`/`craft` adapters to come |
 | Minigame | timing | none | `BobberBar`, `IMinigame` | ❌ |
@@ -38,8 +38,11 @@ Rules:
   loading machines (every machine in `Data/Machines`), gifts and quest items for NPCs, gifts and
   proposals to other farmers, fish ponds and festival pots. Without a tile it uses the held item
   in place (`performUseAction`): totems, books.
-- `place(item, tile)`: `plant` without the tilled-soil check. It covers machines, chests,
-  sprinklers, fences, paths, furniture, bombs, mine staircases and tappers.
+- `place(item, tiles)` (#3): `plant` without the tilled-soil check, same `Utility.tryToPlaceItem`. It covers machines,
+  chests, sprinklers, fences, paths, furniture, bombs, mine staircases and tappers.
+- `craft(recipe, quantity)` and `chest(x, y, action, item, quality)` (#3) are macros over the game's own code:
+  `CraftingRecipe` (the recipe the crafting page uses) and `interact` + `menu take/put` (the chest's `ItemGrabMenu`).
+  `menu take/put` also takes `quality`, so the primitive stays complete.
 - `menu()` reads the open menu: its type, title, items with counts or prices, and the actions it
   allows. `menu(action, ...)` acts through a small adapter per menu family:
   - `take` / `put`: chests, fridge, fishing treasure, Lost and Found, shipping bin
@@ -62,10 +65,10 @@ Rules:
 | Clear, till, water, chop, mine | tool on a tile | `use_tool` | ✅ | #15 (batches) |
 | Plant seeds, fertilizer | item on soil | `plant` | ✅ | |
 | Harvest crops, forage | action on a tile | `harvest` | ✅ | |
-| Place machines, chests, sprinklers, fences, furniture | use button with the item | `place` | ❌ | #3 |
+| Place machines, chests, sprinklers, fences, furniture | use button with the item | `place` | 🟡 smoke `place`, `craft_place_chest` written, not yet run in game | #3 |
 | Load a machine | action while holding the input | `interact(holding)` | ✅ smoke `furnace` | #3 |
 | Collect from a machine | action | `interact` | ✅ smoke `furnace` | #3 |
-| Chests, fridge | action → `ItemGrabMenu` | `interact`, then `menu take/put` | ✅ chests (smoke `chest`); 🟡 fridge untested (needs the kitchen) | #3 |
+| Chests, fridge | action → `ItemGrabMenu` | `interact`, then `menu take/put`; `chest` does it in one call (by name and quality, several items, "everything") | ✅ chests (smoke `chest`); 🟡 `chest` (smoke `chest_tool`) and fridge untested; owners and theft: #52 | #3 |
 | Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ | |
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
@@ -84,7 +87,7 @@ Rules:
 | Sell to a shop | click an inventory item in `ShopMenu` | `menu sell` | ❌ | #11 |
 | Tool upgrades | `Blacksmith` → `Blacksmith_Upgrade` → `ShopMenu` | `buy` | 🟡 needs PR #45 (trade items) | #2 |
 | Geodes | `Blacksmith_Process` → `GeodeMenu` | menu adapter | ❌ | #14 |
-| Crafting | crafting tab or `Craft` tile → `CraftingPage` | `menu craft` | ❌ | #3 |
+| Crafting | crafting tab or `Craft` tile → `CraftingPage` | `craft` (macro over `CraftingRecipe`: list, make N) | 🟡 smoke `craft`, `craft_place_chest` written, not yet run in game; the page itself has no `menu` adapter | #3 |
 | Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
 | Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | menu adapter | ❌ | #10 |
 | Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | menu adapter | ❌ | #10 |
@@ -155,7 +158,7 @@ What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselv
 
 1. ✅ `interact(holding)`; `menu` with the reader, the fallback, `take`/`put`, `choose`, `amount` and
    `type`; fix the chest label. This unlocks machines, chests, the fridge, simple menus and Send money.
-2. `place`: `plant` for every placeable item.
+2. `place`: `plant` for every placeable item. (#3 adds `place`, `craft` and `chest`; waiting for a local test.)
 3. Choice policy: naming, cutscene questions, proposals, P4 ready checks.
 4. Menu adapters, most useful for the videos first: craft/cook, sell, quests and Special Orders,
    animals and buildings, bundles and museum, geodes, equipment.

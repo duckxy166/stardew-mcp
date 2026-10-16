@@ -278,6 +278,18 @@ def inventory_count(name: str) -> int:
     return total
 
 
+def inventory_stacks(name: str) -> dict[str, int]:
+    """Stack sizes of items called exactly `name` by quality ('normal', 'silver', 'gold', 'iridium'), from `inventory`."""
+    out: dict[str, int] = {}
+    for line in ok("inventory").splitlines():
+        m = re.match(r"\s*slot \d+: (.+?) x(\d+) \[(.*)\]$", line)
+        if m and m.group(1).lower() == name.lower():
+            tags = [t.strip() for t in m.group(3).split(",")]
+            quality = next((t for t in tags if t in ("silver", "gold", "iridium")), "normal")
+            out[quality] = out.get(quality, 0) + int(m.group(2))
+    return out
+
+
 def open_shop(location: str, hhmm: int) -> str:
     """Set the time, travel to `location` and interact with its action tiles until a shop opens. Returns shop_list."""
     debug("set_time", time=hhmm)
@@ -538,6 +550,121 @@ def chest():
             raise Smoke("menu ok did not close the chest")
     finally:
         call("close_menu")
+
+
+@case("craft")
+def craft():
+    """craft() lists the known recipes; craft(recipe, quantity) goes through CraftingRecipe: ingredients used, items arrive."""
+    reset("Farm")
+    debug("add_item", id="(O)388", qty=100)  # Wood
+    debug("add_item", id="(O)390", qty=50)  # Stone
+    listing = ok("craft")
+    if "Craftable now:" not in listing or "Missing ingredients:" not in listing:
+        raise Smoke(f"craft() does not list recipes:\n{listing[:400]}")
+    if call("craft", recipe="Not A Real Recipe", reason="smoke test")[0]:
+        raise Smoke("craft accepted a recipe the player does not know")
+    ready = re.findall(r"^  (.+?)(?: \(makes (\d+)\))?: .*\[you can craft (\d+)\]$", listing, re.M)
+    if not ready:
+        raise SkipCase("no known recipe can be crafted with 100 Wood and 50 Stone")
+    names = [r[0] for r in ready]
+    name = next((n for n in ("Wood Fence", "Chest", "Torch", "Wood Path", "Stone Fence") if n in names), names[0])
+    text = ok("craft", recipe=name, quantity=1, reason="smoke test")
+    if not text.startswith("Crafted 1x") or not re.search(r"\+\d+", text) or not re.search(r"-\d+", text):
+        raise Smoke(f"craft {name} did not show an item gained and ingredients used: {text.splitlines()[0]}")
+
+
+@case("place")
+def place():
+    """place puts items on free ground through Utility.tryToPlaceItem and says why a tile did not work."""
+    reset("Farm")
+    debug("add_item", id="(BC)130")  # Chest
+    debug("add_item", id="(BC)130")  # a second one, for the occupied-tile check
+    debug("add_item", id="(BC)13")  # Furnace
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 free tiles near the player")
+    left, _, right = runs[0]
+    text = ok("place", item="Chest", tiles=[left], reason="smoke test")
+    if not text.startswith("Placed 1/1"):
+        raise Smoke(f"chest was not placed: {text.splitlines()[0]}")
+    text = ok("place", item="Furnace", tiles=[right], reason="smoke test")
+    if not text.startswith("Placed 1/1"):
+        raise Smoke(f"furnace was not placed: {text.splitlines()[0]}")
+    things = {pt: label for label, pts in parse_things(ok("look", radius=10), "O") for pt in pts}
+    if not things.get(tuple(left), "").startswith("Chest") or not things.get(tuple(right), "").startswith("Furnace"):
+        raise Smoke(f"look does not show the placed items at {left} and {right}: {things}")
+    good, text = call("place", item="Chest", tiles=[left], reason="smoke test")
+    if good or "already has" not in text:
+        raise Smoke(f"placing on an occupied tile should fail with 'already has': {text.splitlines()[0]}")
+
+
+def tool_count() -> int:
+    return sum("[tool" in line for line in ok("inventory").splitlines())
+
+
+@case("chest_tool")
+def chest_tool():
+    """chest walks to a chest and stores/takes by name and quality, in one call, through menu take/put."""
+    reset("Farm")
+    if inventory_stacks("Cauliflower"):
+        raise SkipCase("the pack already holds Cauliflower; the case counts exact stacks")
+    debug("add_item", id="(O)190", qty=5)  # Cauliflower (normal)
+    debug("add_item", id="(O)190", qty=3, quality=2)  # Cauliflower (gold)
+    debug("add_item", id="(O)472", qty=3)  # Parsnip Seeds, which "everything" keeps
+    if inventory_stacks("Cauliflower") != {"normal": 5, "gold": 3}:
+        raise Smoke(f"setup: expected 5 normal and 3 gold Cauliflower, the inventory shows {inventory_stacks('Cauliflower')}")
+    seeds, tools = inventory_count("Parsnip Seeds"), tool_count()
+    x, y = place_near("(BC)130")  # Chest
+    at = {"x": x, "y": y, "reason": "smoke test"}
+    try:
+        if call("chest", action="list", reason="smoke test")[0]:
+            raise Smoke("chest without a tile and without an open chest menu should fail")
+        text = ok("chest", action="store", item="Cauliflower", quality="gold", **at)
+        if "Stored 3x Cauliflower (gold)" not in text or inventory_stacks("Cauliflower") != {"normal": 5}:
+            raise Smoke(f"storing only the gold Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="list", **at)
+        if "3x Cauliflower (gold)" not in text:
+            raise Smoke(f"list does not show the gold Cauliflower:\n{text}")
+        text = ok("chest", action="store", items=["Cauliflower"], **at)
+        if "5x Cauliflower (normal)" not in text or inventory_stacks("Cauliflower"):
+            raise Smoke(f"storing the rest of the Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="take", item="Cauliflower", quality="gold", quantity=2, **at)
+        if "Took 2x Cauliflower (gold)" not in text or inventory_stacks("Cauliflower") != {"gold": 2}:
+            raise Smoke(f"taking 2 gold Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="store", item="everything", **at)
+        if tool_count() != tools or inventory_count("Parsnip Seeds") != seeds:
+            raise Smoke(f"store everything must keep tools and seeds:\n{text}")
+        text = ok("chest", action="take", item="everything", **at)
+        if inventory_stacks("Cauliflower") != {"normal": 5, "gold": 3}:
+            raise Smoke(f"take everything did not bring every Cauliflower back:\n{text}")
+        if "Menu open" in ok("status"):
+            raise Smoke("the chest tool left a menu open")
+    finally:
+        call("close_menu")
+
+
+@case("craft_place_chest")
+def craft_place_chest():
+    """craft a Chest, place it, then use it: the whole new-tool chain on one item."""
+    reset("Farm")
+    debug("add_item", id="(O)388", qty=120)  # Wood
+    if "Chest" not in ok("craft"):
+        raise SkipCase("this player does not know the Chest recipe")
+    chests = inventory_count("Chest")
+    text = ok("craft", recipe="Chest", quantity=99, reason="smoke test")
+    if not text.startswith("Crafted") or "Stopped after" not in text:
+        raise Smoke(f"crafting 99 chests should make a few and stop on ingredients: {text.splitlines()[0]}")
+    if inventory_count("Chest") <= chests:
+        raise Smoke("no Chest item arrived")
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 free tiles near the player")
+    x, y = runs[0][1]
+    ok("place", item="Chest", tiles=[[x, y]], reason="smoke test")
+    debug("add_item", id="(O)24", qty=2)  # Parsnip
+    ok("chest", x=x, y=y, action="store", item="Parsnip", reason="smoke test")
+    if inventory_count("Parsnip") != 0:
+        raise Smoke("the crafted and placed chest did not take the Parsnips")
 
 
 @case("mine_elevator")
