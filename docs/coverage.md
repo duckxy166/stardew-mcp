@@ -17,7 +17,7 @@ Every system behind that handler is then covered without new code.
 | Action button | right-click | `interact(x, y, holding?)` | `Game1.pressActionButton`: the held item's use action or eating, else `tryToCheckAt` → `GameLocation.checkAction` | ✅ `holding` picks the item; handlers that wait for a fresh press (`didPlayerJustRightClick`: chests, shipping bin, fish ponds) see it |
 | Use button | left-click | `use_tool`, `plant` | `Farmer.BeginUsingTool`, `Utility.tryToPlaceItem` | 🟡 places only on tilled soil |
 | Dialogue answer | click an option | `respond(option)` | `DialogueBox` → `answerDialogueAction` or the question's callback | ✅ |
-| Menu | click, type | `menu`; `shop_list`, `buy`, `close_menu` | the menu's own click and handler methods | 🟡 reader, fallback, `take`/`put`, `choose`, `amount`, `type`, `ok`/`cancel`; `buy`/`sell`/`craft` adapters to come |
+| Menu | click, type | `menu`; `shop_list`, `buy`, `close_menu` | the menu's own click and handler methods | 🟡 reader, fallback, `take`/`put`, `choose`, `amount`, `type`, `ok`/`cancel`; `buy`/`craft` adapters to come; selling is the `sell` tool (#11) |
 | Minigame | timing | none | `BobberBar`, `IMinigame` | ❌ |
 
 Rules:
@@ -70,7 +70,7 @@ Rules:
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
 | Pass out (2:00, no energy) | automatic | | 🟡 | #22 |
-| TV: weather, luck, recipes | action on the TV → question | `interact` + `respond` | 🟡 untested | #14 |
+| TV: weather, luck, recipes | action on the TV → question | `interact` + `respond`; weather and luck also come free in `status`, dates and shop hours in `calendar` | 🟡 untested; `status`/`calendar` have smoke `calendar` (tomorrow's luck is not stored by the game, so `status` shows today's) | #14, #11 |
 | Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
 | Totems, books | action button while holding the item (`performUseAction`) | `interact(holding)` without a tile | ✅ totems (smoke `totem`); 🟡 books untested | |
 | Animal care | pet (action), milk/shear (tool), hay (hopper) | `interact`, `use_tool` | 🟡 | #10 |
@@ -81,7 +81,7 @@ Rules:
 | System | How a human does it | Covered by | Status | Issue |
 |---|---|---|---|---|
 | Buy | shop counter → `ShopMenu` | `shop_list`, `buy` | ✅ (PR #45: `tryToPurchaseItem`, recipes, trade items) | #7 |
-| Sell to a shop | click an inventory item in `ShopMenu` | `menu sell` | ❌ | #11 |
+| Sell to a shop | click an inventory item in `ShopMenu` | `sell(item, quantity)`: clicks the inventory slot, the shop decides what it buys | 🟡 untested; smoke `sell_to_shop`; right-click selling one item is assumed | #11 |
 | Tool upgrades | `Blacksmith` → `Blacksmith_Upgrade` → `ShopMenu` | `buy` | 🟡 needs PR #45 (trade items) | #2 |
 | Geodes | `Blacksmith_Process` → `GeodeMenu` | menu adapter | ❌ | #14 |
 | Crafting | crafting tab or `Craft` tile → `CraftingPage` | `menu craft` | ❌ | #3 |
@@ -118,7 +118,7 @@ Rules:
 | Mine ladders, shafts | action on a tile | `interact` | ✅ | |
 | Mine elevator | `MineElevator` → `MineElevatorMenu` | `menu choose` | ✅ smoke `mine_elevator` | #2 |
 | Combat | weapon swings, aim | fight driver | ❌ | #5, #6 |
-| Festivals | arrive on time → ready check `festivalStart` → actions, shops, games | travel + primitives + game drivers | ❌ | #11 |
+| Festivals | arrive on time → ready check `festivalStart` → actions, shops, games | `calendar` (dates, hours), `travel_to`, `festival(start/leave)`, `talk_to` reaches festival villagers and booths, `interact(holding)` for the Luau soup | 🟡 untested; Egg Hunt eggs and the Fair and ice-fishing games are not covered | #11 |
 | Night events: fairy, witch, meteorite, Qi plane | automatic | | 🟡 they play by themselves | |
 | Arcade, casino, darts, crane | `IMinigame`, `CalicoJack`, `Slots` | drivers (optional) | ❌ | |
 | Desert, Skull Cavern, Ginger Island, movie theater, Qi | travel, tile actions, menus | primitives | ❌ not checked | |
@@ -135,7 +135,7 @@ Use the game's multiplayer features first. Add mod rules only where the game has
 | Give an item to a player | action holding the item → `SendProposal(Gift)`: one item, the receiver may decline | `give` (PR #50 moves the stack directly, no decline) | ✅ different path | #39 |
 | Marriage, dance, baby between players | `SendProposal(Marriage/Dance/Baby)` → `PendingProposalDialog` | `interact(holding)` + `menu choose` | ❌ | |
 | Owned plots and chests | no mechanic | mod rule: a cabin and its chests belong to its owner; plots on the plan board | ❌ | #40 |
-| Sleep, festival start/end | `ReadyCheckDialog` waits for every online farmer, P4 included | AI seats wait inside their action; P4 must accept automatically | ❌ untested | #38 |
+| Sleep, festival start/end | `ReadyCheckDialog` waits for every online farmer, P4 included | AI seats wait inside their action (`festival(start)` waits in the ready check); P4 must accept automatically | 🟡 P4 auto-accept still missing | #38, #11 |
 
 ## Choice policy
 

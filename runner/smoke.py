@@ -429,6 +429,54 @@ def buy_recipe():
     ok("close_menu")
 
 
+@case("calendar")
+def calendar():
+    """#11: calendar lists the shops and the next festival; status shows tomorrow's weather and luck."""
+    reset("Farm")
+    now = fresh_state()
+    text = ok("calendar")
+    for needle in ("Today is ", "Shops (", "Next festival:"):
+        if needle not in text:
+            raise Smoke(f"calendar is missing \"{needle}\": {text.splitlines()[0]}")
+    if now.get("season") == "spring" and now.get("dayOfMonth", 99) < 13 and "Egg Festival" not in text:
+        raise Smoke("calendar does not mention the Egg Festival (spring 13)")
+    status = ok("status")
+    for needle in ("Tomorrow:", "Luck today:"):
+        if needle not in status:
+            raise Smoke(f"status is missing \"{needle}\"")
+    if "Festival today:" not in text:  # an ordinary day: there is no festival to start
+        good, _ = call("festival", action="start", reason="smoke test")
+        if good:
+            raise Smoke("festival(start) succeeded on a day without a festival")
+
+
+@case("sell_to_shop")
+def sell_to_shop():
+    """#11: sell pays gold at once through the shop menu (ship only pays overnight)."""
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; run the gate on another day to cover selling")
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=3)  # Parsnip
+    open_shop("SeedShop", 1000)  # Pierre's is open 9:00-17:00 (closed Wednesdays)
+
+    before = inventory_count("Parsnip")
+    money = fresh_state().get("money")
+    text = ok("sell", item="Parsnip", quantity=1, reason="smoke test")
+    m = re.search(r"Sold (\d+)x .+? for (\d+)g", text)
+    if not m or int(m.group(2)) <= 0:
+        raise Smoke(f"sell result has no positive price: {text.splitlines()[0]}")
+    sold = int(m.group(1))
+    if inventory_count("Parsnip") != before - sold:
+        raise Smoke(f"expected {before - sold} Parsnip after selling {sold}, have {inventory_count('Parsnip')}")
+    if fresh_state().get("money") != money + int(m.group(2)):
+        raise Smoke("money did not rise by the reported price")
+
+    good, text = call("sell", item="Axe", reason="smoke test")  # tools are never bought
+    if good:
+        raise Smoke(f"selling an Axe should fail, got: {text.splitlines()[0]}")
+    ok("close_menu")
+
+
 @case("choose_profession")
 def choose_profession():
     """#8: level-5 profession choices wait for the AI; an unmade choice gets the default at bedtime."""

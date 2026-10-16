@@ -118,7 +118,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(Core()));
+        return new List<ToolDef>(SocialTools.All().Concat(Core()).Concat(CalendarToolDefs()));
     }
 
     private static List<ToolDef> Core()
@@ -136,7 +136,7 @@ public static partial class AgentTools
             new()
             {
                 Name = "status",
-                Description = "Current day, time, weather, location, position, energy, money, held item and any open dialogue/menu.",
+                Description = "Current day, time, weather (and tomorrow's), daily luck, location, position, energy, money, held item and any open dialogue/menu.",
                 Schema = Obj(new { }),
                 Instant = true, AppendStatus = false,
                 Run = (a, c) => Instant(c, StatusText())
@@ -211,7 +211,7 @@ public static partial class AgentTools
             new()
             {
                 Name = "talk_to",
-                Description = "Walk to a villager on this map and talk to them. Optionally give them an item from your inventory as a gift.",
+                Description = "Walk to a villager on this map (at a festival: villagers and booth keepers like Pierre) and talk to them. Optionally give them an item from your inventory as a gift.",
                 Schema = Obj(new { name = Str("Villager name, e.g. Pierre"), gift_item = Str("Optional item name to give as a gift"), reason = Str(ReasonDesc) }, "name", "reason"),
                 Run = TalkTo
             },
@@ -728,7 +728,8 @@ public static partial class AgentTools
     private static IEnumerator TalkTo(JsonElement a, CallContext c)
     {
         var name = S(a, "name");
-        var npc = Loc.characters.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || n.displayName.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var npc = Loc.characters.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || n.displayName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                  ?? FestivalActor(name); // at a festival the villagers are event actors, not map characters
         if (npc == null) { c.Fail($"{name} is not on this map ({Loc.Name})."); yield break; }
 
         var gift = S(a, "gift_item");
@@ -749,7 +750,8 @@ public static partial class AgentTools
             Face(npc.TilePoint);
             if (giftSlot >= 0) P.CurrentToolIndex = giftSlot;
             else if (P.ActiveObject != null) P.CurrentToolIndex = FirstToolSlot();
-            Game1.tryToCheckAt(npc.TilePoint.ToVector2(), P);
+            bool handled = Game1.tryToCheckAt(npc.TilePoint.ToVector2(), P);
+            if (!handled && Game1.activeClickableMenu == null && !Game1.dialogueUp) FestivalAction(npc.TilePoint); // festival booths/actors
             yield return Ticks(20);
             if (Game1.activeClickableMenu != null || Game1.dialogueUp)
             {

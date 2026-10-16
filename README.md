@@ -54,7 +54,9 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
 | `interact`, `talk_to`, `respond`, `close_menu` | Objects, villagers, dialogue and menus; `interact` can hold an item first (load a machine, use a totem) |
 | `menu` | Read any open menu, then use it: take/put (chests), choose (mine elevator), amount (send money), type (names), ok/cancel, or click a listed button |
-| `shop_list`, `buy`, `ship`, `eat` | Shopping, shipping bin, food |
+| `shop_list`, `buy`, `sell`, `ship`, `eat` | Shopping, selling to an open shop for gold at once, shipping bin (pays overnight), food |
+| `calendar` | Today and the next days: festivals, birthdays, the next festival, and the main shops' hours and closed days (no game time) |
+| `festival` | On a festival day: `start` talks to Lewis and answers yes (waits for the other players), `leave` walks out; `talk_to` also reaches festival villagers and booths |
 | `wait`, `go_to_bed` | Let time pass, end the day |
 | `say`, `whisper`, `emote`, `give` | Multi-player (split-screen): chat to everyone, tell one player privately, show an emote, hand an item to a nearby player. All cost no game time |
 | `plan_read`, `plan_edit` | Shared plan board with an edit history (author and time) |

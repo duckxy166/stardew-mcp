@@ -35,6 +35,7 @@ public static class WorldText
         var loc = Game1.currentLocation;
         var sb = new StringBuilder();
         sb.AppendLine($"Farm day {AgentLog.FarmDay} — {Game1.currentSeason} {Game1.dayOfMonth}, year {Game1.year} ({Game1.shortDayNameFromDayOfSeason(Game1.dayOfMonth)}) {FormatTime(Game1.timeOfDay)} · weather: {Weather()}");
+        sb.AppendLine(AgentTools.OutlookLine()); // festival today, tomorrow's weather, daily luck (CalendarTools.cs)
         sb.AppendLine($"Location: {loc?.Name}{(loc is StardewValley.Locations.MineShaft ms ? $" (floor {ms.mineLevel})" : "")} at ({p.TilePoint.X},{p.TilePoint.Y}) facing {DirName(p.FacingDirection)}");
         sb.AppendLine($"Energy {(int)p.Stamina}/{p.MaxStamina} · Health {p.health}/{p.maxHealth} · Money {p.Money}g");
         var held = p.CurrentItem;
@@ -63,7 +64,7 @@ public static class WorldText
     {
         var sb = new StringBuilder();
         if (Game1.eventUp)
-            sb.AppendLine("A cutscene/event is playing.");
+            sb.AppendLine(AgentTools.FestivalLine() ?? "A cutscene/event is playing.");
         switch (Game1.activeClickableMenu)
         {
             case null:
@@ -82,7 +83,7 @@ public static class WorldText
                     sb.AppendLine("Use respond() to continue the dialogue.");
                 break;
             case ShopMenu shop:
-                sb.AppendLine($"Shop menu open ({shop.ShopId}). Use shop_list / buy, then close_menu.");
+                sb.AppendLine($"Shop menu open ({shop.ShopId}). Use shop_list / buy / sell, then close_menu.");
                 break;
             case LetterViewerMenu letter:
                 var letterText = letter.mailMessage != null ? string.Join(" ", letter.mailMessage).Replace("\n", " ").Replace("^", " ") : "";
@@ -119,7 +120,7 @@ public static class WorldText
 
         if (p.TilePoint == pt) return ('@', null);
 
-        foreach (var npc in loc.characters)
+        foreach (var npc in loc.characters.Concat(AgentTools.FestivalActors())) // festival villagers are event actors
         {
             if (npc.TilePoint != pt) continue;
             if (npc is StardewValley.Monsters.Monster mon) return ('M', $"{mon.Name} (HP {mon.Health})");
