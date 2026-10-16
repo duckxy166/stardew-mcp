@@ -814,6 +814,99 @@ def send_money():
         call("close_menu")
 
 
+def enter_shop(location: str, owner: str, hhmm: int = 1000) -> None:
+    """Walk into a shop at `hhmm`; SkipCase when the door is locked or its owner isn't there (closed day)."""
+    debug("set_time", time=hhmm)
+    good, text = call("travel_to", location=location, reason="smoke test")
+    if not good:
+        raise SkipCase(f"{location} is not reachable now ({text.splitlines()[0][:120]})")
+    if owner not in ok("look", radius=14):
+        raise SkipCase(f"{owner} is not in {location} today (closed day)")
+
+
+@case("ranch_build")
+def ranch_build():
+    """#10: build list, free-spot suggestions, an order Robin accepts, then 'busy' while she builds; upgrade_house guards."""
+    reset("Farm")
+    good, text = call("upgrade_house", reason="smoke test")
+    if good:
+        raise Smoke("upgrade_house worked away from Robin's shop")
+    if not any(w in text for w in ("ScienceHouse", "fully upgraded", "underway")):
+        raise Smoke(f"upgrade_house refusal does not say why: {text.splitlines()[0]}")
+
+    listing = ok("build", building="list")
+    for name in ("Coop", "Barn", "Silo"):
+        if name not in listing:
+            raise Smoke(f"build list has no {name}: {listing[:300]}")
+    price = re.search(r"Coop[^\n:]*: ([\d,]+)g", listing)
+    if not price:
+        raise Smoke(f"build list shows no Coop price: {listing[:300]}")
+    cost = int(price.group(1).replace(",", ""))
+
+    spots = ok("build", building="Coop")
+    if "No free" in spots:
+        raise SkipCase("no free area for a Coop on this farm; clear some ground")
+    m = re.search(r"top-left tile\): \((\d+),(\d+)\)", spots)
+    if not m:
+        raise Smoke(f"build(Coop) suggested no spot: {spots[:300]}")
+    x, y = int(m.group(1)), int(m.group(2))
+
+    enter_shop("ScienceHouse", "Robin")
+    if "busy" in ok("build", building="list"):
+        raise SkipCase("Robin is already building something in this save")
+    debug("set_money", n=cost + 500)
+    debug("add_item", id="388", qty=400)  # Wood
+    debug("add_item", id="390", qty=200)  # Stone
+    money = fresh_state().get("money")
+    text = ok("build", building="Coop", x=x, y=y, reason="smoke test")
+    if "Robin is building" not in text:
+        raise Smoke(f"build did not start: {text.splitlines()[0]}")
+    if fresh_state().get("money") != money - cost:
+        raise Smoke(f"expected money {money - cost}g after the Coop, got {fresh_state().get('money')}g")
+    if "Under construction" not in ok("status"):
+        raise Smoke("status does not show the Coop under construction")
+    good, text = call("build", building="Barn", x=x, y=y, reason="smoke test")
+    if good or "busy" not in text:
+        raise Smoke(f"Robin should be busy with the Coop, got: {text.splitlines()[0]}")
+
+
+@case("ranch_animals")
+def ranch_animals():
+    """#10: Marnie's list, the shop gate, and (when a finished coop has room) buy, pet, collect and feed."""
+    reset("Farm")
+    listing = ok("buy_animal", type="list")
+    if "Chicken" not in listing:
+        raise Smoke(f"buy_animal list has no Chicken: {listing[:300]}")
+    price = int(re.search(r"Chicken: ([\d,]+)g", listing).group(1).replace(",", ""))
+    ok("animals")
+    good, _ = call("buy_animal", type="Chicken", reason="smoke test")
+    if good:
+        raise Smoke("buy_animal worked away from Marnie's shop")
+    if "room in Coop" not in listing and "room in Big Coop" not in listing and "room in Deluxe Coop" not in listing:
+        raise SkipCase("no finished coop with room on this farm (Robin builds one over a night); gate and list were checked")
+
+    enter_shop("AnimalShop", "Marnie")
+    debug("set_money", n=price + 500)
+    money = fresh_state().get("money")
+    text = ok("buy_animal", type="Chicken", name="Smokey", reason="smoke test")
+    if "Smokey" not in text:
+        raise Smoke(f"buy_animal result does not name the animal: {text.splitlines()[0]}")
+    if fresh_state().get("money") != money - price:
+        raise Smoke(f"expected money {money - price}g after the chicken, got {fresh_state().get('money')}g")
+    overview = ok("animals")
+    if "Smokey" not in overview:
+        raise Smoke(f"animals does not list the new chicken:\n{overview}")
+    house = re.search(r'enter with travel_to "([^"]+)"', overview)
+    if not house:
+        raise Smoke("animals does not say how to enter the coop")
+    ok("travel_to", location=house.group(1), reason="smoke test")
+    text = ok("animals", action="pet", reason="smoke test")
+    if not re.search(r"Pet [1-9]\d* of", text):
+        raise Smoke(f"no animal was pet: {text.splitlines()[0]}")
+    ok("animals", action="collect", reason="smoke test")  # nothing to collect from a baby: only the result shape is checked
+    call("animals", action="feed", reason="smoke test")  # needs a silo with hay: result shape only
+
+
 CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
 
 

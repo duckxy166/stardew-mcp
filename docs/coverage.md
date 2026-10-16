@@ -73,7 +73,7 @@ Rules:
 | TV: weather, luck, recipes | action on the TV → question | `interact` + `respond` | 🟡 untested | #14 |
 | Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
 | Totems, books | action button while holding the item (`performUseAction`) | `interact(holding)` without a tile | ✅ totems (smoke `totem`); 🟡 books untested | |
-| Animal care | pet (action), milk/shear (tool), hay (hopper) | `interact`, `use_tool` | 🟡 | #10 |
+| Animal care | pet (action), milk/shear (tool), hay (hopper) | `animals` (pet / collect / feed: `FarmAnimal.pet`, the Milk Pail or Shears swing, the hopper tile); `interact` and `use_tool` also work | 🟡 untested in game (PR for #10) | #10 |
 | Horse | stable, name, mount (action) | `interact` | 🟡 riding untested | #10 |
 
 ### Shops, crafting, upgrades
@@ -86,8 +86,8 @@ Rules:
 | Geodes | `Blacksmith_Process` → `GeodeMenu` | menu adapter | ❌ | #14 |
 | Crafting | crafting tab or `Craft` tile → `CraftingPage` | `menu craft` | ❌ | #3 |
 | Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
-| Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | menu adapter | ❌ | #10 |
-| Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | menu adapter | ❌ | #10 |
+| Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | `build`, `upgrade_house`: `Farm.buildStructure` and the `upgrade_Yes` answer, costs from `Game1.buildingData` | 🟡 untested in game (PR for #10); upgrading a built coop or barn (Big Coop...) and renovation are missing | #10 |
+| Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | `buy_animal`: creates the `FarmAnimal`, `AnimalHouse.adoptAnimal`; prices from `Game1.farmAnimalData` | 🟡 untested in game (PR for #10); the random brown chicken or cow colour is not handled | #10 |
 | Rings, boots, hats, clothes | equipment slots in `InventoryPage` | menu adapter | ❌ | #27 |
 | Tailoring, dye, forge | `Tailoring`, `DyePot`, `Forge` tiles | menu adapter | ❌ | |
 | Trash cans | `Garbage` tile | `interact` | 🟡 untested | #14 |
