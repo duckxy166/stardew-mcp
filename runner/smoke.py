@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -232,6 +233,8 @@ def reset(location: str = "Farm") -> None:
     debug("set_stamina", n=270)
     debug("set_health", n=100)
     debug("set_money", n=2000)
+    # Events about other seats (arrivals, weather) must not cut a case's walk short; "caught_slacking" switches them on itself.
+    debug("perception", interrupts=0, clear=1)
     if fresh_state().get("location") != location:
         ok("travel_to", location=location, reason="smoke test setup")
 
@@ -994,6 +997,79 @@ def theft():
                 pass
 
 
+@case("caught_slacking")
+@social
+def caught_slacking():
+    """
+    p2 says and writes on the plan board that it is watering, then stands in a long wait. p1's look shows what p2 is
+    actually doing next to those claims. A plain say leaves the wait alone; an @mention stops it and hands p2 the message.
+    """
+    reset("Farm")
+    loc, px, py = p1_tile()
+    unfreeze()
+    debug_seat("p2", "warp", location=loc, x=px + 2, y=py)
+    ok_seat("p2", "plan_edit", section="Smoke work", text="p2 waters the parsnips all morning")
+    ok_seat("p2", "say", text="SLACK1 off to water the parsnips")
+
+    outcome: dict = {}
+
+    def nap() -> None:
+        try:
+            outcome["call"] = call_seat("p2", "wait", {"minutes": 120, "reason": "smoke test: napping"})
+        except Exception as e:  # reported on the main thread
+            outcome["error"] = e
+
+    napper = threading.Thread(target=nap, daemon=True)
+    try:
+        debug("perception", interrupts=1, clear=1)  # p2 arriving next to p1 was news; only what happens from now on counts
+        napper.start()
+
+        look, t0 = "", time.time()
+        while time.time() - t0 < 10 and "wait 120 min" not in look:
+            look = ok_seat("p1", "look", radius=12)
+            time.sleep(0.4)
+        line = next((ln for ln in look.splitlines() if "(p2)" in ln and "Actually doing" in ln), "")
+        if "Other players in view" not in look or not line:
+            raise Smoke(f"p1's look does not list p2 with what it is doing:\n{look[-600:]}")
+        for needle, what in (("wait 120 min (standing still)", "the running tool"), ("napping", "its reason"),
+                             ("SLACK1 off to water", "its last say"), ("waters the parsnips all morning", "its plan board section")):
+            if needle not in line:
+                raise Smoke(f"the line about p2 lacks {what} ({needle}):\n{line}")
+        if "Other players in view" not in ok_seat("p1", "status"):
+            raise Smoke("status does not list the players in view")
+
+        ok_seat("p1", "say", text="SLACK2 hello there")
+        time.sleep(1.5)
+        if not napper.is_alive():
+            raise Smoke(f"a say without @ stopped p2's wait: {outcome}")
+
+        ok_seat("p1", "say", text="@p2 SLACK3 I can see you napping")
+        napper.join(15)
+        if napper.is_alive():
+            raise Smoke("p2's wait did not stop when p1 mentioned it with @p2")
+        if "error" in outcome:
+            raise Smoke(f"p2's wait call failed: {outcome['error']}")
+        good, text = outcome["call"]
+        if not good or "Interrupted" not in text or "wait" not in text or "mentioned you" not in text:
+            raise Smoke(f"p2's wait should end with an Interrupted result naming the mention:\n{text}")
+        if "SLACK3" not in text:
+            raise Smoke(f"the interrupted result lacks the message that caused it:\n{text}")
+        if "Waited until" in text:
+            raise Smoke("the wait ran to its end instead of being interrupted")
+    finally:
+        try:
+            if napper.is_alive():
+                ok_seat("p1", "say", text="@p2 smoke test over")  # interrupts are still on: this ends the wait
+                napper.join(10)
+        except Exception:
+            pass
+        debug("perception", interrupts=0, clear=1)
+        try:
+            ok_seat("p2", "plan_edit", section="Smoke work", text="")
+        except Exception:
+            pass
+
+
 @case("bedtime")
 @social
 def bedtime():
@@ -1066,6 +1142,7 @@ def main() -> int:
     failures = 0
     try:
         load_and_wait(smoke_name)
+        debug("perception", interrupts=0)  # a loaded save switches interrupts on; the cases walk past other seats
         log.new_errors()  # ignore load-time noise from before the first case
         for c in chosen:
             if c.skip:

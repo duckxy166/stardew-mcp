@@ -30,6 +30,7 @@ public class ModEntry : Mod
         Players.Init(helper, Monitor, _config, _log);
         WorldClock.Init(_config);
         Ownership.Init(Path.Combine(helper.DirectoryPath, "data"), Monitor);
+        Perception.Init();
         FarmRules.Init(Monitor, _config);
         SplitScreen.Init(helper, Monitor, _config);
         SplitScreenPatches.Apply(ModManifest, _config);
