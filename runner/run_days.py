@@ -29,6 +29,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+from tool_results import format_day_summary, load_day_summary, tag_for_entry
+
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
 DEFAULT_OUT = HERE.parent / "runs"
@@ -89,8 +91,18 @@ def last_actions(log_dir: Path, day: int, n: int = 25) -> str:
             continue
         if e.get("kind") in ("think", "action", "result"):
             text = (e.get("text") or "").replace("\n", " ")[:200]
+            tag = tag_for_entry(e) if e.get("kind") == "result" else ""  # [partial · low_energy] etc., as the model saw it
+            if tag:
+                text = f"{tag} {text}"
             out.append(f"{e.get('gameTime')} {e['kind']} {e.get('tool') or ''}: {text}")
     return "\n".join(out[-n:])
+
+
+def report_failures(log_dir: Path, day: int) -> None:
+    """Print the day's failure reasons per tool (day_XXX_summary.json, written by the mod when the day ends)."""
+    summary = load_day_summary(log_dir, day)
+    if summary:
+        print("  " + format_day_summary(summary).replace("\n", "\n  "))
 
 
 def save_folder() -> Path | None:
@@ -232,6 +244,7 @@ def main():
         s = wait_ready()
         if s["day"] > day:
             backup_save(out_dir, day)
+            report_failures(log_dir, day)
             days_played += 1
         else:
             print(f"Day {day} still not finished after {args.max_parts} sessions — stopping for a human to check.")

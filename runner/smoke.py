@@ -34,6 +34,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from tool_results import check_structured
+
 API = "http://localhost:8770"
 SMOKE_PREFIX = "smoke_"
 
@@ -84,8 +86,8 @@ def state() -> dict:
 _rpc_id = 0
 
 
-def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
-    """Call an MCP tool on one seat's endpoint (p1, p2, p3). Returns (ok, text). Also checks the result shape."""
+def call_raw(seat: str, tool: str, args: dict) -> dict:
+    """Call an MCP tool on one seat's endpoint (p1, p2, p3). Returns the whole result object after checking its shape."""
     global _rpc_id
     _rpc_id += 1
     msg = {"jsonrpc": "2.0", "id": _rpc_id, "method": "tools/call", "params": {"name": tool, "arguments": args}}
@@ -99,10 +101,18 @@ def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
         raise Smoke(f"{tool}: bad result shape (content): {str(result)[:200]}")
     if not isinstance(result.get("isError"), bool):
         raise Smoke(f"{tool}: bad result shape (isError): {str(result)[:200]}")
-    text = content[0]["text"]
-    if not text.strip():
+    if not content[0]["text"].strip():
         raise Smoke(f"{tool}: empty result text")
-    return (not result["isError"]), text
+    problems = check_structured(result)  # reason code, partial flag and tag (#18); nothing to check on older mod builds
+    if problems:
+        raise Smoke(f"{tool}: bad structured result: {'; '.join(problems)} in {str(result)[:200]}")
+    return result
+
+
+def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
+    """call_raw, reduced to (ok, text)."""
+    result = call_raw(seat, tool, args)
+    return (not result["isError"]), result["content"][0]["text"]
 
 
 def call(tool: str, /, **args) -> tuple[bool, str]:
@@ -812,6 +822,38 @@ def send_money():
         raise Smoke(f"expected p1 1850g and p2 {p2_money + 150}g, got p1 {s.get('money')}g and p2 {now2}g")
     finally:
         call("close_menu")
+
+
+@case("tool_reasons")
+def tool_reasons():
+    """Reason codes (#18): a tool that fails says why in a [tag] and in structuredContent, a batch that stops early says partial."""
+    reset("Farm")
+    plain = call_raw("p1", "status", {})
+    if "structuredContent" not in plain:
+        raise SkipCase("this mod build returns no structuredContent (older than #18)")
+    sc = plain["structuredContent"]
+    if sc.get("ok") is not True or sc.get("reason") != "ok" or plain["content"][0]["text"].startswith("["):
+        raise Smoke(f"a plain ok result should be untagged with reason ok: {str(plain)[:200]}")
+
+    # A known failure: a tool the player does not have -> no_item, tagged, isError.
+    bad = call_raw("p1", "use_tool", {"tool": "Smoke Test Tool", "tiles": [[1, 1]], "reason": "smoke test"})
+    text = bad["content"][0]["text"]
+    if bad["isError"] is not True or bad["structuredContent"] != {"ok": False, "reason": "no_item"} or not text.startswith("[no_item] "):
+        raise Smoke(f"use_tool with a missing tool should fail as [no_item]: {str(bad)[:300]}")
+
+    # A batch that stops early: with 2 energy use_tool stops before the first tile (the tiles are never visited).
+    debug("set_stamina", n=2)
+    try:
+        part = call_raw("p1", "use_tool", {"tool": "Hoe", "tiles": [[1, 1], [2, 1], [3, 1]], "reason": "smoke test"})
+    finally:
+        debug("set_stamina", n=270)
+    sc = part["structuredContent"]
+    text = part["content"][0]["text"]
+    if not text.startswith("[partial \u00b7 low_energy] "):
+        raise Smoke(f"expected the tag [partial \u00b7 low_energy], got: {text.splitlines()[0]}")
+    data = sc.get("data") or {}
+    if sc.get("partial") is not True or sc.get("reason") != "low_energy" or data.get("remaining") != 3 or data.get("done") != 0:
+        raise Smoke(f"expected partial/low_energy with remaining 3, got: {sc}")
 
 
 CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))

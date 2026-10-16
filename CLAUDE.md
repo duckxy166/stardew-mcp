@@ -104,6 +104,7 @@ mod/StardewMCP/
     SocialTools.cs     say / whisper / emote / give / plan board; per-seat inbox appended to the next tool result
     WorldText.cs       Text renderings of status / surroundings / inventory for the model
     AgentLog.cs        Per-day JSONL logs and diaries
+    ToolResult.cs      Reason codes, partial flag and counts of tool results; MCP reply tag + structuredContent; day_XXX_summary.json
     ModConfig.cs       config.json settings
     DebugApi.cs        /api/debug/* and /api/debug/p{N}/* test hooks (warp, build_cabins, capture...), off by default
     Players.cs         The 4 split-screen seats (P1-P3 AI, P4 camera) and their per-screen state
@@ -118,6 +119,7 @@ studio/
 runner/
   smoke.py             LLM-free tool tests on a smoke_* copy of the save (gate for run_days.py)
   run_days.py          One `claude -p` session per in-game day
+  tool_results.py      Reason codes and result tags (Python side of ToolResult.cs); day summary printing
   obs_recorder.py      Pauses OBS recording while the game is frozen
   system_prompt.md     System prompt used by run_days.py
 ```

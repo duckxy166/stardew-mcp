@@ -39,6 +39,8 @@ public class ModEntry : Mod
         helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
         helper.Events.GameLoop.ReturnedToTitle += (_, _) => SplitScreen.OnReturnedToTitle();
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
+        // The day's log is complete here: write day_XXX_summary.json (failure reasons per tool).
+        helper.Events.GameLoop.DayEnding += (_, _) => { if (Context.ScreenId == 0) DaySummary.Write(_log, AgentLog.FarmDay, Monitor); };
 
         helper.ConsoleCommands.Add(
             "mcp_freeze",

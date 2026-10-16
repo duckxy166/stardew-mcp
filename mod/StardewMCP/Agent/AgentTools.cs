@@ -303,7 +303,7 @@ public static partial class AgentTools
         var text = S(a, "text").Trim();
         if (text.Length == 0)
         {
-            c.Fail("text is empty");
+            c.Fail(Reasons.InvalidArgs, "text is empty");
             yield break;
         }
         Rt.Log.Add("think", text: text);
@@ -361,7 +361,7 @@ public static partial class AgentTools
         var path = new Pathfinder().FindPath(loc, start.ToVector2(), target.ToVector2());
         if (path == null)
         {
-            c.Fail($"No walkable path to ({target.X},{target.Y}) on {loc.Name}.");
+            c.Fail(Reasons.NoPath, $"No walkable path to ({target.X},{target.Y}) on {loc.Name}.");
             yield break;
         }
 
@@ -398,7 +398,7 @@ public static partial class AgentTools
         P.controller = null;
         P.Halt();
         if (P.TilePoint != target && Game1.currentLocation == loc)
-            c.Fail($"Could not reach ({target.X},{target.Y}); stopped at ({P.TilePoint.X},{P.TilePoint.Y}).");
+            c.Fail(Reasons.NoPath, $"Could not reach ({target.X},{target.Y}); stopped at ({P.TilePoint.X},{P.TilePoint.Y}).");
     }
 
     private static readonly Point[] Dirs = { new(0, -1), new(1, 0), new(0, 1), new(-1, 0) }; // up right down left
@@ -423,7 +423,7 @@ public static partial class AgentTools
             }
             if (best == null)
             {
-                c.Fail($"No reachable tile next to ({target.X},{target.Y}).");
+                c.Fail(Reasons.NoPath, $"No reachable tile next to ({target.X},{target.Y}).");
                 yield break;
             }
             yield return WalkTo(best.Value, c);
@@ -513,29 +513,31 @@ public static partial class AgentTools
         var toolName = S(a, "tool");
         var tiles = TileList(a, "tiles").Take(40).ToList();
         int maxHits = Math.Clamp(I(a, "max_hits", 20), 1, 60);
-        if (tiles.Count == 0) { c.Fail("No tiles given."); yield break; }
+        if (tiles.Count == 0) { c.Fail(Reasons.InvalidArgs, "No tiles given."); yield break; }
 
         int slot = FindItem(toolName, it => it is Tool);
-        if (slot < 0) { c.Fail($"You don't have a tool called \"{toolName}\". Check inventory."); yield break; }
+        if (slot < 0) { c.Fail(Reasons.NoItem, $"You don't have a tool called \"{toolName}\". Check inventory."); yield break; }
         P.CurrentToolIndex = slot;
         var tool = (Tool)P.Items[slot];
         bool repeatTool = tool is Axe || tool is Pickaxe;
         var before = Snapshot();
         var lines = new List<string>();
         var loc = Loc;
+        var batch = new BatchTally();
 
         foreach (var t in tiles)
         {
             if (P.Stamina <= 2)
             {
                 lines.Add($"Stopped: energy too low ({(int)P.Stamina}). Eat something or go to bed.");
+                batch.Stop = Reasons.LowEnergy;
                 break;
             }
-            if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu/dialogue opened."); break; }
+            if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu/dialogue opened."); batch.Stop = Reasons.MenuOpen; break; }
 
             var sub = new CallContext();
             yield return WalkAdjacent(t, sub);
-            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
+            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); batch.Skip(sub.Reason); continue; }
             P.CurrentToolIndex = slot;
 
             var (sym, label) = WorldText.Describe(loc, t.X, t.Y);
@@ -544,18 +546,21 @@ public static partial class AgentTools
             if (tool is WateringCan can)
             {
                 bool water = loc.isWaterTile(t.X, t.Y) || loc.doesTileHaveProperty(t.X, t.Y, "Water", "Back") != null;
-                if (!water && can.WaterLeft <= 0) { lines.Add($"({t.X},{t.Y}) skipped: watering can is EMPTY — refill it on a water tile (~)."); continue; }
+                if (!water && can.WaterLeft <= 0) { lines.Add($"({t.X},{t.Y}) skipped: watering can is EMPTY — refill it on a water tile (~)."); batch.Skip(); continue; }
                 yield return Swing(t);
-                lines.Add(water ? $"({t.X},{t.Y}) refilled watering can ({can.WaterLeft}/{can.waterCanMax})" : $"({t.X},{t.Y}) watered{(loc.terrainFeatures.TryGetValue(t.ToVector2(), out var tf2) && tf2 is HoeDirt hd && hd.isWatered() ? "" : " (nothing to water here)")} · can {can.WaterLeft}/{can.waterCanMax}");
+                bool wet = loc.terrainFeatures.TryGetValue(t.ToVector2(), out var tf2) && tf2 is HoeDirt hd && hd.isWatered();
+                lines.Add(water ? $"({t.X},{t.Y}) refilled watering can ({can.WaterLeft}/{can.waterCanMax})" : $"({t.X},{t.Y}) watered{(wet ? "" : " (nothing to water here)")} · can {can.WaterLeft}/{can.waterCanMax}");
+                if (water || wet) batch.Done++; else batch.Skip(Reasons.NotHere);
                 continue;
             }
 
             if (tool is Hoe)
             {
-                if (kind == Target.Dirt) { lines.Add($"({t.X},{t.Y}) already tilled"); continue; }
+                if (kind == Target.Dirt) { lines.Add($"({t.X},{t.Y}) already tilled"); batch.Done++; continue; }
                 yield return Swing(t);
                 var ok = loc.terrainFeatures.TryGetValue(t.ToVector2(), out var tf3) && tf3 is HoeDirt;
                 lines.Add(ok ? $"({t.X},{t.Y}) tilled" : $"({t.X},{t.Y}) could not till ({label ?? sym.ToString()}) — clear it first or pick a ',' tile");
+                if (ok) batch.Done++; else batch.Skip();
                 continue;
             }
 
@@ -563,12 +568,14 @@ public static partial class AgentTools
             {
                 yield return Swing(t);
                 lines.Add($"({t.X},{t.Y}) used {tool.DisplayName} on {label ?? "tile"}");
+                batch.Done++;
                 continue;
             }
 
             if (kind == Target.None || kind == Target.Dirt || kind == Target.Grass)
             {
                 lines.Add($"({t.X},{t.Y}) nothing for {tool.DisplayName} here ({label ?? sym.ToString()})");
+                batch.Skip(Reasons.NotHere);
                 continue;
             }
 
@@ -579,6 +586,8 @@ public static partial class AgentTools
                 hits++;
             }
             var after = TargetAt(loc, t);
+            if (after == Target.None) batch.Done++;
+            else batch.Skip(P.Stamina <= 2 ? Reasons.LowEnergy : Game1.activeClickableMenu != null ? Reasons.MenuOpen : kind == Target.Clump ? Reasons.NeedsUpgrade : null);
             lines.Add(after == Target.None
                 ? $"({t.X},{t.Y}) {label} cleared in {hits} hits"
                 : $"({t.X},{t.Y}) {label} NOT cleared after {hits} hits (still: {WorldText.Describe(loc, t.X, t.Y).label}){(kind == Target.Clump ? " — may need an upgraded tool" : "")}");
@@ -587,6 +596,7 @@ public static partial class AgentTools
         yield return Ticks(45); // let dropped items fly into the inventory
         var diff = Diff(before);
         c.Result = string.Join("\n", lines) + (diff.Length > 0 ? "\n" + diff : "");
+        batch.Apply(c, tiles.Count);
     }
 
     private static IEnumerator Plant(JsonElement a, CallContext c)
@@ -594,22 +604,23 @@ public static partial class AgentTools
         var name = S(a, "item");
         var tiles = TileList(a, "tiles").Take(40).ToList();
         int slot = FindItem(name, it => it is SObject);
-        if (slot < 0) { c.Fail($"No \"{name}\" in inventory."); yield break; }
+        if (slot < 0) { c.Fail(Reasons.NoItem, $"No \"{name}\" in inventory."); yield break; }
         var loc = Loc;
         var lines = new List<string>();
-        int planted = 0;
+        var batch = new BatchTally();
 
         foreach (var t in tiles)
         {
-            if (P.Items[slot] == null || P.Items[slot].Stack <= 0) { lines.Add("Ran out of seeds."); break; }
+            if (P.Items[slot] == null || P.Items[slot].Stack <= 0) { lines.Add("Ran out of seeds."); batch.Stop = Reasons.NoItem; break; }
             if (!loc.terrainFeatures.TryGetValue(t.ToVector2(), out var tf) || tf is not HoeDirt dirt)
             {
                 lines.Add($"({t.X},{t.Y}) not tilled soil — use the Hoe first");
+                batch.Skip(Reasons.NotHere);
                 continue;
             }
             var sub = new CallContext();
             yield return WalkAdjacent(t, sub);
-            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
+            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); batch.Skip(sub.Reason); continue; }
 
             P.CurrentToolIndex = slot;
             var item = (SObject)P.Items[slot];
@@ -618,10 +629,15 @@ public static partial class AgentTools
             Utility.tryToPlaceItem(loc, item, t.X * 64 + 32, t.Y * 64 + 32);
             yield return Ticks(8);
             bool ok = (!hadCrop && dirt.crop != null) || dirt.fertilizer.Value != hadFert;
-            if (ok) planted++;
-            else lines.Add($"({t.X},{t.Y}) could not plant {item.DisplayName} (occupied, wrong season, or not plantable here)");
+            if (ok) batch.Done++;
+            else
+            {
+                lines.Add($"({t.X},{t.Y}) could not plant {item.DisplayName} (occupied, wrong season, or not plantable here)");
+                batch.Skip(); // the game gives no way to tell occupied from wrong season, so no reason code
+            }
         }
-        c.Result = $"Planted {planted}/{tiles.Count} tiles." + (lines.Count > 0 ? "\n" + string.Join("\n", lines) : "");
+        c.Result = $"Planted {batch.Done}/{tiles.Count} tiles." + (lines.Count > 0 ? "\n" + string.Join("\n", lines) : "");
+        batch.Apply(c, tiles.Count);
     }
 
     private static IEnumerator Harvest(JsonElement a, CallContext c)
@@ -630,21 +646,25 @@ public static partial class AgentTools
         var before = Snapshot();
         var loc = Loc;
         var lines = new List<string>();
+        var batch = new BatchTally();
         foreach (var t in tiles)
         {
-            if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu opened (inventory full?)."); break; }
+            if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu opened (inventory full?)."); batch.Stop = Reasons.MenuOpen; break; }
             var sub = new CallContext();
             yield return WalkAdjacent(t, sub);
-            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
+            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); batch.Skip(sub.Reason); continue; }
             var label = WorldText.Describe(loc, t.X, t.Y).label;
             loc.checkAction(new xTile.Dimensions.Location(t.X, t.Y), Game1.viewport, P);
             yield return Ticks(20);
             yield return WaitIdle(120);
-            lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {WorldText.Describe(loc, t.X, t.Y).label ?? "empty"}");
+            var now = WorldText.Describe(loc, t.X, t.Y).label;
+            lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {now ?? "empty"}");
+            if (label != now) batch.Done++; else batch.Skip(); // the tile looks the same: nothing was picked up
         }
         yield return Ticks(30);
         var diff = Diff(before);
         c.Result = string.Join("\n", lines) + "\n" + (diff.Length > 0 ? diff : "Nothing was collected.");
+        batch.Apply(c, tiles.Count);
     }
 
     /// <summary>True while interact presses the action button; see <see cref="JustRightClick_Prefix"/>.</summary>
@@ -675,9 +695,9 @@ public static partial class AgentTools
     {
         var holding = S(a, "holding").Trim();
         int slot = holding.Length > 0 ? FindItem(holding) : -1;
-        if (holding.Length > 0 && slot < 0) { c.Fail($"No \"{holding}\" in inventory."); yield break; }
+        if (holding.Length > 0 && slot < 0) { c.Fail(Reasons.NoItem, $"No \"{holding}\" in inventory."); yield break; }
         bool atTile = Has(a, "x") && Has(a, "y");
-        if (!atTile && slot < 0) { c.Fail("Give the tile (x, y), or holding to use an item where you stand."); yield break; }
+        if (!atTile && slot < 0) { c.Fail(Reasons.InvalidArgs, "Give the tile (x, y), or holding to use an item where you stand."); yield break; }
 
         var before = Snapshot();
         var startLoc = Loc;
@@ -706,7 +726,7 @@ public static partial class AgentTools
         }
         else
         {
-            c.Fail($"{held} can't be used where you stand.");
+            c.Fail(Reasons.NotHere, $"{held} can't be used where you stand.");
             yield break;
         }
         yield return Ticks(30);
@@ -729,14 +749,14 @@ public static partial class AgentTools
     {
         var name = S(a, "name");
         var npc = Loc.characters.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || n.displayName.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (npc == null) { c.Fail($"{name} is not on this map ({Loc.Name})."); yield break; }
+        if (npc == null) { c.Fail(Reasons.NotHere, $"{name} is not on this map ({Loc.Name})."); yield break; }
 
         var gift = S(a, "gift_item");
         int giftSlot = -1;
         if (gift.Length > 0)
         {
             giftSlot = FindItem(gift, it => it is SObject);
-            if (giftSlot < 0) { c.Fail($"No \"{gift}\" in inventory to gift."); yield break; }
+            if (giftSlot < 0) { c.Fail(Reasons.NoItem, $"No \"{gift}\" in inventory to gift."); yield break; }
         }
 
         for (int attempt = 0; attempt < 4; attempt++)
@@ -810,7 +830,7 @@ public static partial class AgentTools
     {
         var dest = S(a, "location").Trim();
         var target = Game1.getLocationFromName(dest);
-        if (target == null) { c.Fail($"Unknown location \"{dest}\"."); yield break; }
+        if (target == null) { c.Fail(Reasons.NotFound, $"Unknown location \"{dest}\"."); yield break; }
         yield return TravelTo(target.Name, c);
         if (c.Ok) c.Result = $"Arrived in {Loc.Name} at ({P.TilePoint.X},{P.TilePoint.Y}).";
     }
@@ -865,7 +885,7 @@ public static partial class AgentTools
     {
         yield return WaitIdle();
         var route = FindRoute(Loc.Name, dest);
-        if (route == null) { c.Fail($"No known route from {Loc.Name} to {dest}."); yield break; }
+        if (route == null) { c.Fail(Reasons.NoPath, $"No known route from {Loc.Name} to {dest}."); yield break; }
 
         for (int hop = 1; hop < route.Count; hop++)
         {
@@ -875,7 +895,7 @@ public static partial class AgentTools
             var me = P.TilePoint;
             var exit = Exits(loc).Where(e => e.Target == next)
                 .OrderBy(e => Math.Abs(e.Tile.X - me.X) + Math.Abs(e.Tile.Y - me.Y)).FirstOrDefault();
-            if (exit == null) { c.Fail($"No exit from {loc.Name} to {next}."); yield break; }
+            if (exit == null) { c.Fail(Reasons.NoPath, $"No exit from {loc.Name} to {next}."); yield break; }
 
             var sub = new CallContext();
             if (exit.IsDoor)
@@ -887,7 +907,7 @@ public static partial class AgentTools
                 else yield return WalkAdjacent(d, sub);
                 if (Loc == loc)
                 {
-                    if (!sub.Ok) { c.Fail($"Can't reach the door to {next}: {sub.Result}"); yield break; }
+                    if (!sub.Ok) { c.Fail(sub.Reason ?? Reasons.NoPath, $"Can't reach the door to {next}: {sub.Result}"); yield break; }
                     Face(d);
                     Game1.tryToCheckAt(d.ToVector2(), P);
                 }
@@ -896,14 +916,14 @@ public static partial class AgentTools
             {
                 // Edge exits sit just off the walkable map: get as close as possible, then step through.
                 var near = Pathfinder.IsWalkable(loc, exit.Tile.X, exit.Tile.Y) ? exit.Tile : NearestWalkable(loc, exit.Tile, 3);
-                if (near == null) { c.Fail($"Can't find a walkable tile near the exit to {next}."); yield break; }
+                if (near == null) { c.Fail(Reasons.NoPath, $"Can't find a walkable tile near the exit to {next}."); yield break; }
                 yield return WalkTo(near.Value, sub);
                 if (Loc == loc && !Game1.isWarping)
                 {
                     // The last step onto an edge exit is often blocked by the map edge itself, so being right next to it is enough.
                     var here = P.TilePoint;
                     bool atExit = Math.Abs(here.X - exit.Tile.X) + Math.Abs(here.Y - exit.Tile.Y) <= 1;
-                    if (!sub.Ok && !atExit) { c.Fail($"Can't reach the exit to {next}: {sub.Result}"); yield break; }
+                    if (!sub.Ok && !atExit) { c.Fail(sub.Reason ?? Reasons.NoPath, $"Can't reach the exit to {next}: {sub.Result}"); yield break; }
                     var w = exit.Warp!;
                     Game1.warpFarmer(w.TargetName, w.TargetX, w.TargetY, false);
                 }
@@ -914,7 +934,7 @@ public static partial class AgentTools
             if (Loc == loc)
             {
                 var msg = Game1.activeClickableMenu != null ? WorldText.MenuState().Trim() : "the door may be locked (check opening hours)";
-                c.Fail($"Couldn't go from {loc.Name} to {next}: {msg}");
+                c.Fail(Game1.activeClickableMenu != null ? Reasons.MenuOpen : Reasons.ShopClosed, $"Couldn't go from {loc.Name} to {next}: {msg}");
                 yield break;
             }
             if (Loc.Name != next) { c.Fail($"Ended up in {Loc.Name} instead of {next}."); yield break; }
@@ -941,7 +961,7 @@ public static partial class AgentTools
 
     private static IEnumerator ShopList(JsonElement a, CallContext c)
     {
-        if (Game1.activeClickableMenu is not ShopMenu shop) { c.Fail("No shop is open. interact with a shop counter (A tile) during opening hours first."); yield break; }
+        if (Game1.activeClickableMenu is not ShopMenu shop) { c.Fail(Reasons.NotHere, "No shop is open. interact with a shop counter (A tile) during opening hours first."); yield break; }
         var cur = CurrencyUnit(shop.currency);
         var sb = new StringBuilder($"Shop {shop.ShopId} — you have {ShopMenu.getPlayerCurrencyAmount(P, shop.currency)}{cur}\n");
         foreach (var s in shop.forSale)
@@ -967,26 +987,26 @@ public static partial class AgentTools
     /// are consumed, purchase actions run and limited stock is synced, exactly like a click in the menu.</summary>
     private static IEnumerator Buy(JsonElement a, CallContext c)
     {
-        if (Game1.activeClickableMenu is not ShopMenu shop) { c.Fail("No shop is open."); yield break; }
+        if (Game1.activeClickableMenu is not ShopMenu shop) { c.Fail(Reasons.NotHere, "No shop is open."); yield break; }
         if (shop.readOnly) { c.Fail("This shop menu is read-only; nothing can be bought here."); yield break; }
         var name = S(a, "item").Trim().ToLowerInvariant();
         int qty = Math.Clamp(I(a, "quantity", 1), 1, 999);
         var sal = shop.forSale.FirstOrDefault(s => s.DisplayName.ToLowerInvariant() == name)
                   ?? shop.forSale.FirstOrDefault(s => s.DisplayName.ToLowerInvariant().Contains(name));
-        if (sal == null || !shop.itemPriceAndStock.TryGetValue(sal, out var st)) { c.Fail($"\"{name}\" is not sold here. Use shop_list."); yield break; }
+        if (sal == null || !shop.itemPriceAndStock.TryGetValue(sal, out var st)) { c.Fail(Reasons.NotFound, $"\"{name}\" is not sold here. Use shop_list."); yield break; }
         if (shop.canPurchaseCheck != null && !shop.canPurchaseCheck(shop.forSale.IndexOf(sal))) { c.Fail($"{sal.DisplayName} can't be bought right now."); yield break; }
 
         // Friendly pre-checks; the game's purchase would only play a "cancel" sound.
         if (sal.IsRecipe) qty = 1;
         qty = Math.Min(qty, st.Stock);
-        if (qty <= 0) { c.Fail($"{sal.DisplayName} is sold out."); yield break; }
+        if (qty <= 0) { c.Fail(Reasons.NoItem, $"{sal.DisplayName} is sold out."); yield break; }
         var cur = CurrencyUnit(shop.currency);
         int have = ShopMenu.getPlayerCurrencyAmount(P, shop.currency);
-        if (have < st.Price * qty) { c.Fail($"Not enough money: {qty}x {sal.DisplayName} costs {st.Price * qty}{cur}, you have {have}{cur}."); yield break; }
+        if (have < st.Price * qty) { c.Fail(Reasons.NoMoney, $"Not enough money: {qty}x {sal.DisplayName} costs {st.Price * qty}{cur}, you have {have}{cur}."); yield break; }
         if (st.TradeItem != null)
         {
             int need = (st.TradeItemCount ?? 5) * qty;
-            if (!shop.HasTradeItem(st.TradeItem, need)) { c.Fail($"{sal.DisplayName} also needs {need}x {ItemRegistry.GetData(st.TradeItem)?.DisplayName ?? st.TradeItem}."); yield break; }
+            if (!shop.HasTradeItem(st.TradeItem, need)) { c.Fail(Reasons.NoItem, $"{sal.DisplayName} also needs {need}x {ItemRegistry.GetData(st.TradeItem)?.DisplayName ?? st.TradeItem}."); yield break; }
         }
         // Move the shop's held item into the inventory; whatever doesn't fit is dropped at the player's feet.
         bool dropped = false;
@@ -1005,7 +1025,7 @@ public static partial class AgentTools
         PutAwayHeld();
         var probe = sal.GetSalableInstance();
         probe.Stack = qty * sal.Stack;
-        if (!sal.IsRecipe && !sal.IsInfiniteStock() && !probe.CanBuyItem(P)) { c.Fail($"Can't buy {sal.DisplayName}: inventory is full or you can't hold it."); yield break; }
+        if (!sal.IsRecipe && !sal.IsInfiniteStock() && !probe.CanBuyItem(P)) { c.Fail(Reasons.InventoryFull, $"Can't buy {sal.DisplayName}: inventory is full or you can't hold it."); yield break; }
 
         var purchase = Rt.Helper.Reflection.GetMethod(shop, "tryToPurchaseItem");
         int maxChunk = Math.Max(1, sal.GetSalableInstance().maximumStackSize());
@@ -1048,12 +1068,12 @@ public static partial class AgentTools
 
     private static IEnumerator Ship(JsonElement a, CallContext c)
     {
-        if (Loc is not Farm farm) { c.Fail("The shipping bin is on the Farm. travel_to Farm first."); yield break; }
+        if (Loc is not Farm farm) { c.Fail(Reasons.NotHere, "The shipping bin is on the Farm. travel_to Farm first."); yield break; }
         var bin = farm.buildings.FirstOrDefault(b => b.buildingType.Value == "Shipping Bin");
-        if (bin == null) { c.Fail("No shipping bin found."); yield break; }
+        if (bin == null) { c.Fail(Reasons.NotFound, "No shipping bin found."); yield break; }
         var name = S(a, "item");
         int slot = FindItem(name);
-        if (slot < 0) { c.Fail($"No \"{name}\" in inventory."); yield break; }
+        if (slot < 0) { c.Fail(Reasons.NoItem, $"No \"{name}\" in inventory."); yield break; }
         var item = P.Items[slot];
         if (item is Tool || !item.canBeShipped()) { c.Fail($"{item.DisplayName} can't be shipped."); yield break; }
 
@@ -1061,7 +1081,7 @@ public static partial class AgentTools
         var sub = new CallContext();
         yield return WalkAdjacent(binTile, sub);
         if (!sub.Ok) yield return WalkAdjacent(new Point(binTile.X + 1, binTile.Y), sub = new CallContext());
-        if (!sub.Ok) { c.Fail($"Can't reach the shipping bin: {sub.Result}"); yield break; }
+        if (!sub.Ok) { c.Fail(sub.Reason ?? Reasons.NoPath, $"Can't reach the shipping bin: {sub.Result}"); yield break; }
 
         int qty = Has(a, "quantity") ? Math.Clamp(I(a, "quantity", item.Stack), 1, item.Stack) : item.Stack;
         var toShip = item.getOne();
@@ -1080,7 +1100,7 @@ public static partial class AgentTools
     {
         var name = S(a, "item");
         int slot = FindItem(name, it => it is SObject o && o.Edibility > -300);
-        if (slot < 0) { c.Fail($"No edible \"{name}\" in inventory."); yield break; }
+        if (slot < 0) { c.Fail(Reasons.NoItem, $"No edible \"{name}\" in inventory."); yield break; }
         yield return WaitIdle();
         var before = (int)P.Stamina;
         var itemName = P.Items[slot].DisplayName;
@@ -1125,7 +1145,7 @@ public static partial class AgentTools
     private static IEnumerator GoToBed(JsonElement a, CallContext c)
     {
         var diary = S(a, "diary").Trim();
-        if (diary.Length < 20) { c.Fail($"Write a real diary entry in {Lang} first (diary parameter)."); yield break; }
+        if (diary.Length < 20) { c.Fail(Reasons.InvalidArgs, $"Write a real diary entry in {Lang} first (diary parameter)."); yield break; }
 
         int dayBefore = Game1.Date.TotalDays;
         int moneyBefore = P.Money;
@@ -1136,7 +1156,7 @@ public static partial class AgentTools
         {
             var sub = new CallContext();
             yield return TravelTo("FarmHouse", sub);
-            if (!sub.Ok) { c.Fail($"Couldn't get home: {sub.Result}"); yield break; }
+            if (!sub.Ok) { c.Fail(sub.Reason ?? Reasons.NoPath, $"Couldn't get home: {sub.Result}"); yield break; }
         }
         var house = (FarmHouse)Loc;
         var spot = house.GetPlayerBedSpot();

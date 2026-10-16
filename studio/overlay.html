@@ -202,13 +202,26 @@ function resultTh(text, ok) {
   return line.length > 38 ? line.slice(0, 36) + "…" : line;
 }
 
-// one result line for an action: ok flag + short Thai
+// reason codes of the mod's tool results (Reasons in ToolResult.cs) -> short Thai; codes not listed here are shown as they are
+const REASON_TH = {
+  partial: "ทำได้บางส่วน", low_energy: "พลังงานหมด", no_path: "ไม่มีทางไป", not_here: "ไม่ได้อยู่ตรงนี้", no_item: "ไม่มีของ",
+  inventory_full: "กระเป๋าเต็ม", menu_open: "มีเมนูเปิดอยู่", too_late: "สายเกินไป", shop_closed: "ร้านปิด", wrong_season: "ผิดฤดู",
+  needs_upgrade: "ต้องอัปเกรด", interrupted: "ถูกขัดจังหวะ", timeout: "หมดเวลา", no_money: "เงินไม่พอ", invalid_args: "ใส่ค่าผิด",
+  not_found: "ไม่พบ", not_ready: "เกมยังไม่พร้อม",
+};
+const reasonTh = r => (r && r !== "ok" && r !== "other" && r !== "error") ? (REASON_TH[r] || r) : "";
+
+// one result line for an action: ok flag + short Thai. A partial result (reason + partial from the mod) is ok, but marked ◐.
 function judge(tool, args, e) {
   let ok = e.ok !== false, th = resultTh(e.text, ok);
+  const partial = ok && e.partial === true, reason = e.reason || null;
   // asked for one tile, stopped on another: count it as a miss
   const m = (e.text || "").match(/^Arrived at \((\d+),\s*(\d+)\)/);
   if (tool === "walk_to" && m && args && args.x !== undefined && (+m[1] !== +args.x || +m[2] !== +args.y)) { ok = false; th = `ไปไม่ถึง หยุดที่ (${m[1]},${m[2]})`; }
-  return { ok, th };
+  // lead with the reason unless a RESULT_TH sentence already says it
+  const label = reasonTh(reason), known = RESULT_TH.some(([re]) => re.test((e.text || "").split("\n")[0]));
+  if (label && (!ok || partial) && !known) th = `${label} · ${th}`;
+  return { ok, th, partial, reason, mark: !ok ? "✗" : partial ? "◐" : "✓" };
 }
 
 // ✓/✗ counts and start-of-day money from a whole day's log (survives overlay reloads)
@@ -289,8 +302,8 @@ function onEntry(e, state) {
 function renderLog() {
   $("hist").innerHTML = hist.slice(-4).map(h => {
     const ok = h.result ? h.result.ok : null;
-    const mark = ok === null ? "…" : ok ? "✓" : "✗";
-    const color = ok === null ? C.dim : ok ? C.ok : "var(--bad-mark)";
+    const mark = ok === null ? "…" : h.result.mark;
+    const color = ok === null ? C.dim : !ok ? "var(--bad-mark)" : h.result.partial ? C.act : C.ok;
     const tool = TOOL_EN[h.action.tool] || h.action.tool;
     return `<div class="hist"><span class="tool">${esc(tool)}</span><span class="why">${esc(h.action.why || target(h.action.tool, h.action.args))}</span><span class="mark" style="color:${color}">${mark}</span></div>`;
   }).join("");
@@ -299,7 +312,7 @@ function renderLog() {
 function renderAction(frozen, speaker) {
   const a = cur.action, r = cur.result;
   let text, color;
-  if (r) { text = `ผล: ${r.ok ? "✓" : "✗"} ${r.th}`; color = r.ok ? C.ok : C.bad; }
+  if (r) { text = `ผล: ${r.mark} ${r.th}`; color = !r.ok ? C.bad : r.partial ? C.act : C.ok; }
   else if (a) { text = `ทำ: ${TOOL[a.tool] || a.tool} ${target(a.tool, a.args)}`.trim(); color = C.act; }
   else if (frozen) { text = "กำลังคิด…"; color = C.think; }
   else { text = speaker ? "ตอบ: ?" : "ทำ: ?"; color = C.dim; }
@@ -403,7 +416,9 @@ const MOCK_SCRIPT = [
   [{}, { kind: "action", tool: "walk_to", text: "เดินออกจากประตูบ้านลงไปข้างล่าง", args: { x: 3, y: 12 } }],
   [{}, { kind: "result", tool: "walk_to", text: "Arrived at (3,11).", ok: true }],
   [{}, { kind: "action", tool: "travel_to", text: "ออกไปที่ฟาร์ม", args: { location: "Farm" } }],
-  [{}, { kind: "result", tool: "travel_to", text: "No known route from FarmHouse to Farm.", ok: false }],
+  [{}, { kind: "result", tool: "travel_to", text: "No known route from FarmHouse to Farm.", ok: false, reason: "no_path" }],
+  [{}, { kind: "action", tool: "use_tool", text: "[ตัวอย่าง] ทุบหินหน้าบ้าน", args: { tool: "Pickaxe", direction: "down" } }],
+  [{}, { kind: "result", tool: "use_tool", text: "Stopped: energy too low (2). Used the Pickaxe 12 times.", ok: true, reason: "low_energy", partial: true }],
   [{ location: "SeedShop" }, { kind: "action", tool: "talk_to", text: "[ตัวอย่าง] ทักทาย Pierre", args: { name: "Pierre" } }],
   [{ dialogue: { speaker: "Pierre" } }, { kind: "result", tool: "talk_to", text: "Talking to Pierre (friendship 0 hearts).", ok: true }],
   [{}, { kind: "think", text: "[ตัวอย่าง] ความคิดของ Haiku ว่าจะตอบ Pierre ยังไง" }],

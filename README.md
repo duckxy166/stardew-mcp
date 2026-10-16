@@ -59,6 +59,22 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `say`, `whisper`, `emote`, `give` | Multi-player (split-screen): chat to everyone, tell one player privately, show an emote, hand an item to a nearby player. All cost no game time |
 | `plan_read`, `plan_edit` | Shared plan board with an edit history (author and time) |
 
+### Tool results
+
+Every tool reply keeps its plain text and adds a machine-readable part (MCP `structuredContent`). `isError` is unchanged: it is `true` only when the tool failed.
+
+```json
+{ "content": [{ "type": "text", "text": "[partial · low_energy] Stopped: energy too low (2). ..." }],
+  "isError": false,
+  "structuredContent": { "ok": true, "reason": "low_energy", "partial": true, "data": { "done": 12, "remaining": 28, "skipped": 0 } } }
+```
+
+- The text starts with a short tag when the tool did only part of its work (`[partial · reason]`) or failed for a known reason (`[no_path]`). Plain successes have no tag.
+- `reason` is one of: `ok`, `partial`, `low_energy`, `no_path`, `not_here`, `no_item`, `inventory_full`, `menu_open`, `too_late`, `shop_closed`, `wrong_season`, `needs_upgrade`, `interrupted`, `timeout`, plus `no_money`, `invalid_args`, `not_found`, `not_ready`, `error` and `other` (a failure that has no specific code yet). `too_late` and `wrong_season` are reserved: the game gives no reliable signal, so no tool sets them yet.
+- `use_tool`, `plant` and `harvest` are batch tools: they always report `data` (`done`, `remaining` = tiles not reached, `skipped` = tiles tried and failed) and set `partial` when `remaining` or `skipped` is above 0. `reason` then says why the batch stopped (or, failing that, why tiles were skipped).
+- The common failures (`walk_to`, `travel_to`, `use_tool`, `plant`, `harvest`, `interact`, `talk_to`, `buy`, `ship`, `eat`, `go_to_bed`, `shop_list`, `think`) have codes; other tools still return text only (`reason` is `other` on failure).
+- Logs: result lines of `day_NNN.jsonl` carry `reason` and `partial` (the text there stays untagged). Next to each day's log the mod writes `day_NNN_summary.json` with the failure reasons per tool and per player; `run_days.py` prints it after every day. The overlay marks partial results `◐` and shows the reason, the replay shows a reason badge.
+
 ### Other endpoints
 
 | URL | Use |

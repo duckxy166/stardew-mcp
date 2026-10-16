@@ -275,11 +275,13 @@ public class AgentHttp
                 var name = p.GetProperty("name").GetString() ?? "";
                 var args = p.TryGetProperty("arguments", out var a) ? a.Clone() : JsonDocument.Parse("{}").RootElement;
                 if (!_tools.TryGetValue(name, out var tool))
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Unknown tool {name}" } }, isError = true });
+                    return Ok(id, ToolResult.McpError(Reasons.NotFound, $"Unknown tool {name}"));
                 if (!seat.Active)
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Player {seat.Id} is not in the game yet (title screen, loading or still joining). Wait and try again." } }, isError = true });
-                var (ok, text) = await seat.Runtime.Enqueue(tool, args, observation: true);
-                return Ok(id, new { content = new[] { new { type = "text", text } }, isError = !ok });
+                    return Ok(id, ToolResult.McpError(Reasons.NotReady, $"Player {seat.Id} is not in the game yet (title screen, loading or still joining). Wait and try again."));
+                // The reply is the tool's text with a [reason] tag in front, plus structuredContent {ok, reason, partial?, data?}.
+                var call = seat.Runtime.EnqueueCall(tool, args, observation: true);
+                var (ok, text) = await call.Done.Task;
+                return Ok(id, ToolResult.McpReply(ok, text, call.Outcome));
             default:
                 return new { jsonrpc = "2.0", id, error = new { code = -32601, message = $"Method not found: {method}" } };
         }

@@ -29,6 +29,10 @@ public class LogEntry
     public int? Money { get; set; }
     /// <summary>Player id (p1..p4) the entry belongs to; null for run-wide system lines.</summary>
     public string? Player { get; set; }
+    /// <summary>Result lines: the tool's reason code (see <see cref="Reasons"/>), when it set one.</summary>
+    public string? Reason { get; set; }
+    /// <summary>Result lines: true when the call did only part of what was asked.</summary>
+    public bool? Partial { get; set; }
 }
 
 /// <summary>Writes the proof-of-run log (JSONL per in-game day) and keeps a feed for the overlay.</summary>
@@ -77,7 +81,7 @@ public class AgentLog
     /// <summary>A view of this log that stamps every entry with one player's id.</summary>
     public PlayerLog For(string player) => new(this, player);
 
-    public LogEntry Add(string kind, string? tool = null, string? text = null, object? args = null, bool? ok = null, long? ms = null, string? player = null)
+    public LogEntry Add(string kind, string? tool = null, string? text = null, object? args = null, bool? ok = null, long? ms = null, string? player = null, ToolOutcome? outcome = null)
     {
         var e = new LogEntry
         {
@@ -93,7 +97,9 @@ public class AgentLog
             Ok = ok,
             Ms = ms,
             Money = Context.IsWorldReady ? Game1.player.Money : null,
-            Player = player
+            Player = player,
+            Reason = outcome?.Reason,
+            Partial = outcome is { Partial: true } ? true : null
         };
 
         lock (_lock)
@@ -111,6 +117,8 @@ public class AgentLog
                 _monitor.Log($"Log write failed: {ex.Message}", LogLevel.Warn);
             }
         }
+        if (kind == "result")
+            DaySummary.Touch(this, e.Day, _monitor);
         return e;
     }
 
@@ -157,8 +165,8 @@ public class PlayerLog
         Player = player;
     }
 
-    public LogEntry Add(string kind, string? tool = null, string? text = null, object? args = null, bool? ok = null, long? ms = null) =>
-        _log.Add(kind, tool, text, args, ok, ms, Player);
+    public LogEntry Add(string kind, string? tool = null, string? text = null, object? args = null, bool? ok = null, long? ms = null, ToolOutcome? outcome = null) =>
+        _log.Add(kind, tool, text, args, ok, ms, Player, outcome);
 
     public void WriteDiary(int day, string text) => _log.WriteDiary(day, text, Player);
 }

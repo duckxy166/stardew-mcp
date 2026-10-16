@@ -24,7 +24,8 @@
   .row .k { font-size: 13px; color: var(--muted); }
   .row.think .txt { color: var(--think); font-size: 17px; }
   .row .res { color: var(--muted); font-size: 13px; white-space: pre-wrap; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .part { color: var(--accent); }
+  .why { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid currentColor; border-radius: 6px; font-size: 12px; }
   @media (max-width: 700px) { main { grid-template-columns: 1fr; } nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--edge); } nav button { width: auto; white-space: nowrap; } .row { grid-template-columns: 56px 1fr; } .row .k { display: none; } }
 </style>
 </head>
@@ -71,13 +72,22 @@ function render() {
   const es = data.entries;
   const acts = es.filter(e => e.kind === "action").length;
   const fails = es.filter(e => e.kind === "result" && e.ok === false).length;
+  const parts = es.filter(e => e.kind === "result" && e.ok !== false && e.partial === true).length;
+  // most common reason codes of the day's failed / partial results (the mod writes `reason` on result lines)
+  const why = {};
+  es.forEach(e => { if (e.kind === "result" && e.reason && (e.ok === false || e.partial)) why[e.reason] = (why[e.reason] || 0) + 1; });
+  const top = Object.entries(why).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 3).map(([r, n]) => `${r} ×${n}`).join(", ");
   const t0 = es[0]?.ts, t1 = es[es.length - 1]?.ts;
   const mins = t0 && t1 ? Math.round((new Date(t1) - new Date(t0)) / 60000) : 0;
-  $("sum").textContent = `วันที่ ${data.day} · ${acts} actions · ล้มเหลว ${fails} · ใช้เวลาจริง ~${mins} นาที`;
+  $("sum").textContent = `วันที่ ${data.day} · ${acts} actions · ล้มเหลว ${fails}${parts ? ` · ทำได้บางส่วน ${parts}` : ""}${top ? ` (${top})` : ""} · ใช้เวลาจริง ~${mins} นาที`;
   $("rows").innerHTML = es.filter(e => show[e.kind]).map(e => {
     if (e.kind === "think") return `<div class="row think"><span class="t">${e.gameTime}</span><span class="k">💭 คิด</span><span class="txt">${esc(e.text)}</span></div>`;
     if (e.kind === "action") return `<div class="row"><span class="t">${e.gameTime}</span><span class="k">▶ ${esc(e.tool)}</span><span>${esc(e.text)} <span class="res">${esc(e.args ? JSON.stringify(e.args) : "")}</span></span></div>`;
-    if (e.kind === "result") return `<div class="row"><span class="t">${e.gameTime}</span><span class="k ${e.ok ? "ok" : "bad"}">${e.ok ? "✓" : "✗"} ${esc(e.tool)}</span><span class="res">${esc(e.text)} (${e.ms} ms)</span></div>`;
+    if (e.kind === "result") {
+      const part = e.ok !== false && e.partial === true, cls = e.ok === false ? "bad" : part ? "part" : "ok";
+      const badge = e.reason && cls !== "ok" ? `<span class="why ${cls}">${esc(e.reason)}</span>` : "";
+      return `<div class="row"><span class="t">${e.gameTime}</span><span class="k ${cls}">${cls === "bad" ? "✗" : part ? "◐" : "✓"} ${esc(e.tool)}</span><span class="res">${badge}${esc(e.text)} (${e.ms} ms)</span></div>`;
+    }
     return `<div class="row"><span class="t">${e.gameTime}</span><span class="k">${e.kind}</span><span>${esc(e.text)}</span></div>`;
   }).join("");
 }
