@@ -148,6 +148,8 @@ public class AgentRuntime
         private Stopwatch _watch = new();
         private int _ticksInCall;
         private int _callStartDay;
+        /// <summary>This farmer's health on the previous tick of the running action, for the damage interrupt.</summary>
+        private int _lastHealth;
 
         public PendingCall? Current { get; private set; }
 
@@ -172,6 +174,7 @@ public class AgentRuntime
             _ctx = new CallContext();
             _ticksInCall = 0;
             _callStartDay = Context.IsWorldReady ? Game1.Date.TotalDays : 0;
+            _lastHealth = Context.IsWorldReady ? Game1.player.health : 0;
             _watch = Stopwatch.StartNew();
             _stack.Clear();
 
@@ -215,6 +218,14 @@ public class AgentRuntime
             {
                 _rt.Log.Add("system", text: $"Passed out / new day: farm day {AgentLog.FarmDay}");
                 _ctx!.Result = $"You passed out (2:00 AM or exhausted)! It is now farm day {AgentLog.FarmDay}. Stop here.";
+                Finish();
+                return;
+            }
+
+            // Hurt by a monster close by: end the call so the AI can react (fight, eat, leave) instead of finishing a long action.
+            if (!Current!.Instant && Context.IsWorldReady && AgentTools.DamageInterrupt(Current.Tool.Name, ref _lastHealth) is { } hurt)
+            {
+                _ctx!.Result = hurt;
                 Finish();
                 return;
             }

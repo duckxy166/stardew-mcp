@@ -106,7 +106,8 @@ public static partial class AgentTools
 
     public static string Footer()
     {
-        var sb = new StringBuilder($"[{WorldText.FormatTime(Game1.timeOfDay)} · {Loc?.Name} ({P.TilePoint.X},{P.TilePoint.Y}) · energy {(int)P.Stamina}/{P.MaxStamina} · {P.Money}g]");
+        var sb = new StringBuilder($"[{WorldText.FormatTime(Game1.timeOfDay)} · {Loc?.Name} ({P.TilePoint.X},{P.TilePoint.Y}) · energy {(int)P.Stamina}/{P.MaxStamina}{MineHealthFooter()} · {P.Money}g]");
+        sb.Append(MineLateWarning());
         var menu = WorldText.MenuState().Trim();
         if (menu.Length > 0) sb.Append('\n').Append(menu);
         var prof = Professions.PendingText(Rt, P);
@@ -180,6 +181,7 @@ public static partial class AgentTools
                 Run = UseTool
             },
             CombatTool(),
+            LeaveMineTool(),
             new()
             {
                 Name = "plant",
@@ -1085,12 +1087,18 @@ public static partial class AgentTools
         yield return WaitIdle();
         var before = (int)P.Stamina;
         var itemName = P.Items[slot].DisplayName;
+        yield return EatSlot(slot);
+        c.Result = $"Ate {itemName}: energy {before} → {(int)P.Stamina}.";
+    }
+
+    /// <summary>Eat the item in a slot with the game's own <c>Farmer.eatHeldObject</c> and wait for the animation to end (shared by eat and fight's eat_below).</summary>
+    internal static IEnumerator EatSlot(int slot)
+    {
         P.CurrentToolIndex = slot;
         P.eatHeldObject();
         yield return Ticks(30);
         for (int i = 0; i < 400 && P.isEating; i++) yield return null;
         yield return WaitIdle();
-        c.Result = $"Ate {itemName}: energy {before} → {(int)P.Stamina}.";
     }
 
     // ------------------------------------------------------------------ sleep

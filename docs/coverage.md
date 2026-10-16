@@ -117,7 +117,8 @@ Rules:
 | Crab pots | place, then action holding bait | `place`, `interact(holding)` | ❌ | #4 |
 | Mine ladders, shafts | action on a tile | `interact` | ✅ | |
 | Mine elevator | `MineElevator` → `MineElevatorMenu` | `menu choose` | ✅ smoke `mine_elevator` | #2 |
-| Combat | weapon swings, aim | `fight`: best weapon, walk to the nearest monster, swing with `Farmer.BeginUsingTool` | 🟡 untested, no smoke case yet; health rules for the mines (#6) to come | #5, #6 |
+| Combat | weapon swings, aim | `fight`: best weapon, walk to the nearest monster, swing with `Farmer.BeginUsingTool`; `eat_below` eats through the `eat` tool's path (`Farmer.eatHeldObject`) | 🟡 untested, no smoke case yet | #5, #6 |
+| Mine survival | watch health, eat, climb out | runtime interrupt when a monster within 3 tiles hurts the farmer (every action except `fight`, `eat`, `leave_mine`); `fight` stops at 30% HP; `leave_mine` walks to the up ladder (tile 115) and uses it with `checkAction`, else `Game1.warpFarmer` to the Mine; the footer shows HP and warns from 11 PM | 🟡 untested, no smoke case yet | #6 |
 | Festivals | arrive on time → ready check `festivalStart` → actions, shops, games | travel + primitives + game drivers | ❌ | #11 |
 | Night events: fairy, witch, meteorite, Qi plane | automatic | | 🟡 they play by themselves | |
 | Arcade, casino, darts, crane | `IMinigame`, `CalicoJack`, `Slots` | drivers (optional) | ❌ | |

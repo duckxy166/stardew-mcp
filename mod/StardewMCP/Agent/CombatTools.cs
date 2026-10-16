@@ -9,6 +9,7 @@ using StardewValley;
 using StardewValley.Pathfinding;
 using StardewValley.Tools;
 using Monster = StardewValley.Monsters.Monster;
+using SObject = StardewValley.Object;
 
 namespace StardewMCP.Agent;
 
@@ -23,8 +24,11 @@ public static partial class AgentTools
     /// <summary>Monsters farther than this many tiles are not fought.</summary>
     internal const int FightSightTiles = 12;
 
-    /// <summary>fight() stops when health is at or below this (fixed for now).</summary>
+    /// <summary>fight() never fights on at or below this health, however high the maximum is.</summary>
     internal const int FightStopHealthFloor = 15;
+
+    /// <summary>fight() also stops at this percent of the maximum health (30% of 100 is 30, of 125 is 37).</summary>
+    internal const int FightStopHealthPercent = 30;
 
     /// <summary>Within this many tiles of its target the farmer stops walking and swings.</summary>
     private const float FightMeleeTiles = 2f;
@@ -37,16 +41,25 @@ public static partial class AgentTools
     {
         Name = "fight",
         Description = "Fight monsters near you (mostly in the Mines). You equip your best weapon, walk to the nearest monster within 12 tiles, face it and keep swinging, then go on to the next. " +
-                      "Stops early when no monster is left in range, when your health is low (15 or less) or when a menu opens. About 1.4 game minutes pass per second. " +
-                      "Check Health in status before you start. The result lists the monsters defeated, the damage you took and the loot.",
-        Schema = Obj(new { seconds = Int("How long to fight, 3-25 (default 10)"), reason = Str(ReasonDesc) }, "seconds", "reason"),
+                      "Stops early when no monster is left in range, when your health is low (30% of your maximum, never less than 15) or when a menu opens. About 1.4 game minutes pass per second. " +
+                      "Check Health in status before you start. With eat_below it eats the best health-restoring food from your inventory whenever your health falls below that percent, then keeps fighting. " +
+                      "The result lists the monsters defeated, the damage you took, the food eaten and the loot.",
+        Schema = Obj(new
+        {
+            seconds = Int("How long to fight, 3-25 (default 10)"),
+            eat_below = Int("Optional health percent, 1-99: when your health is below it, eat the best health-restoring food you carry, then keep fighting"),
+            reason = Str(ReasonDesc)
+        }, "seconds", "reason"),
         Run = Fight
     };
 
     // ------------------------------------------------------------------ helpers (shared with other combat tools)
 
-    /// <summary>Health at or below which fight stops. One place to change the rule.</summary>
-    internal static int FightStopHealth(Farmer who) => FightStopHealthFloor;
+    /// <summary>
+    /// Health at or below which fight stops: <c>max(15, 30% of the maximum health)</c>. One place to change the rule.
+    /// Integer maths, so 30% of 100 is exactly 30 (health is a whole number, so "at or below 37.5" is "at or below 37").
+    /// </summary>
+    internal static int FightStopHealth(Farmer who) => Math.Max(FightStopHealthFloor, who.maxHealth * FightStopHealthPercent / 100);
 
     internal static bool IsHealthLow(Farmer who) => who.health <= FightStopHealth(who);
 
@@ -76,6 +89,22 @@ public static partial class AgentTools
         for (int i = 0; i < who.Items.Count; i++)
             if (who.Items[i] is Tool t && t.Name.Contains("Scythe", StringComparison.OrdinalIgnoreCase)) return i;
         return -1;
+    }
+
+    /// <summary>
+    /// Inventory slot of the edible item that restores the most health (edible by the eat tool's rule, Edibility above
+    /// -300), or -1 when the farmer carries nothing that heals.
+    /// </summary>
+    internal static int BestHealingFoodSlot(Farmer who)
+    {
+        int best = -1, bestHealth = 0;
+        for (int i = 0; i < who.Items.Count; i++)
+        {
+            if (who.Items[i] is not SObject food || food.Edibility <= -300) continue;
+            int healing = food.healthRecoveredOnConsumption();
+            if (healing > bestHealth) { best = i; bestHealth = healing; }
+        }
+        return best;
     }
 
     /// <summary>The living monster closest to <paramref name="from"/> within <paramref name="maxTiles"/> tiles, or null.</summary>
@@ -129,6 +158,7 @@ public static partial class AgentTools
     private static IEnumerator Fight(JsonElement a, CallContext c)
     {
         int seconds = Math.Clamp(I(a, "seconds", 10), 3, 25);
+        int eatBelow = Math.Clamp(I(a, "eat_below", 0), 0, 99); // 0 = never eat
         int budget = seconds * 60;
         var loc = Loc;
 
@@ -145,15 +175,41 @@ public static partial class AgentTools
         int swings = 0, nextSwing = 0, nextPlan = 0;
         string stop = "";
         bool allClear = false;
+        var eaten = new List<string>();
+        bool noFood = false;
 
         int t = 0;
         for (; t < budget; t++)
         {
             if (Game1.activeClickableMenu != null || Game1.eventUp) { stop = "Stopped: a menu, dialogue or cutscene opened."; break; }
             if (Game1.currentLocation != loc || Game1.isWarping) { stop = "Stopped: you left the map."; break; }
+            if (eatBelow > 0 && P.health * 100 < P.maxHealth * eatBelow && !P.UsingTool && !P.isEating)
+            {
+                // Before the low-health stop: food that heals is better than quitting. The game's own eating path, like the eat tool.
+                int food = BestHealingFoodSlot(P);
+                if (food < 0)
+                    noFood = true;
+                else
+                {
+                    var item = P.Items[food];
+                    var foodName = item.DisplayName;
+                    int stackBefore = item.Stack;
+                    P.controller = null;
+                    P.Halt();
+                    yield return WaitIdle(60);
+                    yield return EatSlot(food);
+                    if (P.Items[food] == item && item.Stack >= stackBefore)
+                    {
+                        stop = $"Stopped: eating {foodName} did not work.";
+                        break;
+                    }
+                    eaten.Add(foodName);
+                    continue;
+                }
+            }
             if (IsHealthLow(P))
             {
-                stop = $"Stopped: health {P.health}/{P.maxHealth} is at or below {FightStopHealth(P)}. Retreat, eat food or leave before fighting on.";
+                stop = $"Stopped: health {P.health}/{P.maxHealth} is at or below {FightStopHealth(P)}. Eat food or call leave_mine before fighting on.";
                 break;
             }
 
@@ -225,6 +281,8 @@ public static partial class AgentTools
 
         var sb = new StringBuilder($"Fought {t / 60}s with {weapon.DisplayName} ({swings} swings). {stop}");
         sb.Append($"\nDefeated: {(defeated.Count > 0 ? string.Join(", ", defeated) : "none")}.");
+        if (eaten.Count > 0) sb.Append($"\nAte: {string.Join(", ", eaten)}.");
+        if (noFood) sb.Append("\neat_below: you carry no (more) food that restores health.");
         sb.Append($"\nHealth {healthStart} → {P.health}/{P.maxHealth}.");
         var diff = Diff(before);
         if (diff.Length > 0) sb.Append('\n').Append(diff);
