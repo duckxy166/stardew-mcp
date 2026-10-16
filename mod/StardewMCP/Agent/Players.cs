@@ -52,11 +52,24 @@ public class PlayerSlot
         _sinceTick.Restart();
     }
 
+    private volatile int _releasedDay;
+
+    /// <summary>
+    /// True while the runner has released this seat's freeze (POST /api/release_freeze): the seat no longer holds the
+    /// world still, so game time runs on until the farmer passes out (#22). The release belongs to one farm day and
+    /// ends by itself when the day changes; MCP traffic from the seat also ends it.
+    /// </summary>
+    public bool Released => _releasedDay > 0 && _releasedDay == AgentLog.FarmDay;
+
+    /// <summary>Release (or take back the release of) this seat's freeze for the current farm day. Needs a loaded world.</summary>
+    public void SetReleased(bool on) => _releasedDay = on ? AgentLog.FarmDay : 0;
+
     /// <summary>Called when a request for this seat's AI arrives.</summary>
     public void MarkContact()
     {
         Connected = true;
         TimedOut = false;
+        _releasedDay = 0;
     }
 }
 

@@ -20,6 +20,8 @@ namespace StardewMCP.Agent;
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
 ///   GET  /api/memory each AI seat's lessons, plan and notes (what the journal tool wrote)
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
+///   POST /api/release_freeze  runner: stop freezing the world for a seat (body {"seat":"p1"|"all","on":true}) until its farmer
+///                    passes out; ends by itself on the next farm day (#22)
 ///   POST /api/debug/{op}, /api/debug/p{N}/{op}   smoke-test hooks (EnableDebugApi only)
 /// </summary>
 public class AgentHttp
@@ -158,6 +160,9 @@ public class AgentHttp
                 case "/api/memory":
                     await Json(res, Players.Slots.Where(s => s.Role == SeatRole.Ai).ToDictionary(s => s.Id, s => _log.ReadMemory(s.Id)));
                     return;
+                case "/api/release_freeze" when req.HttpMethod == "POST":
+                    await ReleaseFreeze(req, res);
+                    return;
                 case "/api/meta" when req.HttpMethod == "POST":
                     using (var r = new StreamReader(req.InputStream, Encoding.UTF8))
                     {
@@ -179,6 +184,51 @@ public class AgentHttp
             _monitor.Log($"HTTP error: {ex.Message}", LogLevel.Warn);
             try { res.StatusCode = 500; res.Close(); } catch { }
         }
+    }
+
+    // ------------------------------------------------------------------ release the freeze (#22)
+
+    /// <summary>
+    /// The runner is done with a seat for the day (its sessions are used up) but the day is not over. A seat with no action
+    /// running holds the world frozen for ever, so release it: game time runs on until the farmer passes out and the next
+    /// day starts. Body (all optional): {"seat": "p1" (default, like /mcp) | "p2" | "p3" | "all", "on": false to take it back}.
+    /// The release belongs to the current farm day; MCP traffic from the seat ends it too.
+    /// </summary>
+    private async Task ReleaseFreeze(HttpListenerRequest req, HttpListenerResponse res)
+    {
+        string body;
+        using (var r = new StreamReader(req.InputStream, Encoding.UTF8)) body = await r.ReadToEndAsync();
+        JsonElement args;
+        try { args = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body).RootElement.Clone(); }
+        catch (JsonException) { res.StatusCode = 400; res.Close(); return; }
+
+        var who = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("seat", out var sv) && sv.ValueKind == JsonValueKind.String ? sv.GetString() ?? "" : "";
+        bool on = !(args.ValueKind == JsonValueKind.Object && args.TryGetProperty("on", out var ov) && ov.ValueKind == JsonValueKind.False);
+
+        List<PlayerSlot> seats;
+        if (who.Equals("all", StringComparison.OrdinalIgnoreCase))
+            seats = Players.Slots.Where(s => s.Role == SeatRole.Ai).ToList();
+        else if ((who.Length == 0 ? Players.Host : Players.ById(who)) is { Role: SeatRole.Ai } one)
+            seats = new List<PlayerSlot> { one };
+        else
+        {
+            await Json(res, new { ok = false, text = $"Unknown seat \"{who}\"; use p1, p2, p3 or all" });
+            return;
+        }
+        if (!Context.IsWorldReady)
+        {
+            await Json(res, new { ok = false, text = "The game world is not loaded" });
+            return;
+        }
+
+        foreach (var seat in seats)
+        {
+            seat.SetReleased(on);
+            seat.Runtime.Log.Add("system", text: on
+                ? $"Freeze released for {seat.Id}: game time runs on until the farmer passes out or the AI acts again"
+                : $"Freeze release for {seat.Id} taken back");
+        }
+        await Json(res, new { ok = true, released = on, seats = seats.Select(s => s.Id), day = AgentLog.FarmDay });
     }
 
     // ------------------------------------------------------------------ debug (smoke tests)
@@ -317,16 +367,24 @@ public class AgentHttp
     {
         var players = Players.Slots
             .Where(s => s.Screen == 0 || s.Active)
-            .Select(s => new
+            .Select(s =>
             {
-                id = s.Id,
-                role = s.Role == SeatRole.Ai ? "ai" : "camera",
-                active = s.Active,
-                connected = s.Connected,
-                state = s.State,
-                action = s.Runtime.CurrentTool,
-                thinkingSeconds = WorldClock.ThinkingSeconds(s),
-                timedOut = s.TimedOut
+                var pass = PassOut.View(s.Id); // #22: a pass-out whose journal is still owed
+                return new
+                {
+                    id = s.Id,
+                    role = s.Role == SeatRole.Ai ? "ai" : "camera",
+                    active = s.Active,
+                    connected = s.Connected,
+                    state = s.State,
+                    action = s.Runtime.CurrentTool,
+                    thinkingSeconds = WorldClock.ThinkingSeconds(s),
+                    timedOut = s.TimedOut,
+                    released = s.Released,
+                    pendingJournalDay = pass.PendingDay,
+                    pendingJournalDays = pass.PendingDays.Count > 0 ? pass.PendingDays : null,
+                    passOut = pass.Record
+                };
             })
             .ToArray();
 
@@ -336,6 +394,7 @@ public class AgentHttp
             return;
         }
         var p = Game1.player;
+        var hostPass = PassOut.View(Players.Host.Id);
         StateJson = JsonSerializer.Serialize(new
         {
             ready = true,
@@ -358,6 +417,9 @@ public class AgentHttp
                 : null,
             screens = GameRunner.instance.gameInstances.Count,
             plan = PlanBoard.Snapshot(),
+            pendingJournalDay = hostPass.PendingDay,
+            pendingJournalDays = hostPass.PendingDays.Count > 0 ? hostPass.PendingDays : null,
+            passOut = hostPass.Record,
             players
         }, AgentLog.Json);
     }

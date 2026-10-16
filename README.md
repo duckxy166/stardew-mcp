@@ -66,8 +66,9 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 |---|---|
 | `http://localhost:8770/overlay` | OBS browser source (thoughts + actions) |
 | `http://localhost:8770/replay` | Day-by-day replay of the logs |
-| `http://localhost:8770/api/state` | Raw game state JSON |
+| `http://localhost:8770/api/state` | Raw game state JSON. After a day that ended without `go_to_bed` (2:00 AM, health 0), `passOut` says why and `pendingJournalDay` is the day whose journal is still owed until `journal(day=N)` is written |
 | `http://localhost:8770/api/memory` | Each AI seat's lessons, plan and notes (what `journal` wrote) |
+| `POST http://localhost:8770/api/release_freeze` | Runner only: stop an idle seat from freezing the world (`{"seat": "p1"}`, or `"all"`; `"on": false` takes it back) so game time runs until the farmer passes out. Ends with the farm day |
 
 ## Configuration
 

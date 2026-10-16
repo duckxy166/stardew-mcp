@@ -298,6 +298,14 @@ def fresh_state() -> dict:
     return state()
 
 
+def release_freeze(seat: str = "all") -> dict:
+    """POST /api/release_freeze, which run_days.py uses when a day's sessions are used up: an idle seat stops holding the world frozen."""
+    reply = _request("/api/release_freeze", {"seat": seat}, timeout=10)
+    if not reply.get("ok"):
+        raise Smoke(f"release_freeze({seat}) failed: {reply.get('text')}")
+    return reply
+
+
 def journal_and_sleep(diary: str) -> str:
     """#21: go_to_bed refuses until today's journal is written, so every case that sleeps writes one first."""
     ok("journal", diary=diary, lessons="Smoke lesson: water the crops before bed.", plan="## Today\nSmoke plan: water the parsnips.")
@@ -479,6 +487,68 @@ def journal():
         raise Smoke("the catch-up lesson is not filed under the missed day")
     if call("go_to_bed", reason="smoke test")[0]:
         raise Smoke("a catch-up journal for an old day unlocked today's go_to_bed")
+
+
+@case("pass_out")
+def pass_out():
+    """#22: stay up until 2:00 AM -> the freeze is released, the day rolls over, a pass_out record says why
+    (cause 2am, money dropped) and journal(day=N) clears pending_journal_day. Needs an empty shipping bin
+    (overnight income would hide the money lost), which holds right after the `journal` case slept."""
+    reset("Farm")
+    day = fresh_state().get("day")
+    if _request("/api/release_freeze", {"seat": "p4"}, timeout=10).get("ok"):
+        raise Smoke("release_freeze accepted the camera seat")
+
+    debug("set_money", n=2000)
+    debug("set_time", time=2550)  # 1:50 AM: the next ten-minute step is 2:00 AM, which passes the farmer out
+    s = fresh_state()
+    if s.get("pendingJournalDay") is not None:
+        raise Smoke(f"a fresh smoke save should owe no journal, state says {s.get('pendingJournalDay')}")
+
+    release_freeze("all")
+    time.sleep(1)  # /api/state refreshes about 4 times a second
+    s = fresh_state()
+    p1 = next(p for p in s["players"] if p["id"] == "p1")
+    if s.get("frozen") or not p1.get("released"):
+        raise Smoke(f"release_freeze did not unfreeze p1 (frozen {s.get('frozen')}, released {p1.get('released')})")
+
+    # The game clock runs from 1:50 to 2:00 AM; the farmer passes out and the next farm day starts.
+    t0 = time.time()
+    while time.time() - t0 < 240:
+        s = state()
+        if s.get("ready") and s.get("day", day) > day:
+            break
+        time.sleep(2)
+    else:
+        raise Smoke(f"farm day {day} did not end within 240s of released time (clock {s.get('time')}, frozen {s.get('frozen')})")
+
+    # The record is written once the morning has settled.
+    t0 = time.time()
+    while time.time() - t0 < 90 and state().get("pendingJournalDay") is None:
+        time.sleep(1)
+    s = state()
+    rec = s.get("passOut") or {}
+    if s.get("pendingJournalDay") != day or rec.get("day") != day:
+        raise Smoke(f"expected pendingJournalDay {day} and a passOut record for it, got {s.get('pendingJournalDay')} / {rec}")
+    if rec.get("cause") != "2am":
+        raise Smoke(f"expected cause 2am, got {rec.get('cause')} ({rec})")
+    if not rec.get("location") or len(rec.get("tile") or []) != 2:
+        raise Smoke(f"the record lacks location and tile: {rec}")
+    if rec.get("moneyBefore") != 2000 or not rec.get("moneyAfter", 2000) < 2000:
+        raise Smoke(f"expected the money to drop from 2000g, got {rec.get('moneyBefore')}g -> {rec.get('moneyAfter')}g")
+    p1 = next(p for p in s["players"] if p["id"] == "p1")
+    if p1.get("released") or p1.get("pendingJournalDay") != day:
+        raise Smoke(f"the release should end with the farm day and p1 should owe day {day}: {p1}")
+    entries = _request(f"/api/day?n={day + 1}", timeout=10)["entries"]
+    if not any(e.get("kind") == "pass_out" and e.get("player") == "p1" for e in entries):
+        raise Smoke("no pass_out entry in the new day's log")
+
+    # Writing the missed day's journal clears the flag; the record itself stays for the viewers.
+    ok("journal", diary="Smoke test diary: stayed up past 2 AM on purpose and passed out.",
+       lessons="Smoke lesson: go home before 1 AM.", plan="## Today\nSmoke plan: sleep on time.", day=day)
+    s = fresh_state()
+    if s.get("pendingJournalDay") is not None or s.get("pendingJournalDays"):
+        raise Smoke(f"journal(day={day}) did not clear the pending journal: {s.get('pendingJournalDay')}")
 
 
 @case("buy_recipe")

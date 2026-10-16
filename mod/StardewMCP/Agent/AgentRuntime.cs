@@ -60,6 +60,9 @@ public class AgentRuntime
     public bool ActionRunning => _actionLane.Current is { Instant: false };
     public string? CurrentTool => _actionLane.Current?.Tool.Name;
 
+    /// <summary>The "reason" the running action was given (what the viewers see), or null when no action runs. Used by the pass-out record.</summary>
+    public string? CurrentReason => _actionLane.Current is { Instant: false } c ? AgentTools.Reason(c.Args) : null;
+
     public AgentRuntime(IModHelper helper, IMonitor monitor, ModConfig config, PlayerLog log)
     {
         Helper = helper;
@@ -86,6 +89,7 @@ public class AgentRuntime
     {
         _globalTicks++;
         AutoHandleOverlays();
+        PassOut.Tick(this);
         SocialTools.Tick(Log.Player);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);

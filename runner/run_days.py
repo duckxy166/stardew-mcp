@@ -10,6 +10,9 @@ Each day:
   * runs `claude -p` with only the in-game MCP server (http://localhost:8770/mcp),
   * saves Claude's full stream-json transcript next to the game logs (proof of a real run),
   * continues the same day in a new session if Haiku stopped before sleeping,
+  * when the sessions of a day are used up, releases the world freeze (POST /api/release_freeze) so the clock runs
+    to 2:00 AM and the farmer passes out; the next morning's first prompt says what happened and asks for the
+    missed day's journal first (pass_out.py, #22),
   * backs up the save folder after the day ends.
 
 After the last day of the batch, one short text-only session shortens lessons.md and notes.md (the old lists stay
@@ -34,6 +37,7 @@ from datetime import datetime
 from pathlib import Path
 
 import memory
+import pass_out
 
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
@@ -249,6 +253,8 @@ def main():
     ap.add_argument("--goal", default=DEFAULT_GOAL)
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping")
+    ap.add_argument("--pass-out-timeout", type=int, default=1800,
+                    help="Seconds to let game time run when a day's sessions are used up, waiting for the farmer to pass out")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--skip-smoke", action="store_true", help="Do not run runner/smoke.py before the batch")
     ap.add_argument("--skip-consolidation", action="store_true", help="Do not shorten lessons.md and notes.md after the batch")
@@ -269,6 +275,10 @@ def main():
     stopped_early = False
     while True:
         state = wait_ready()
+        # After a pass-out the mod writes its record once the morning has settled; wait for that so the prompt can use it.
+        state = pass_out.wait_settled(game_state)
+        if not state.get("ready"):
+            state = wait_ready()
         day = state["day"]
         if args.until_day and day > args.until_day:
             break
@@ -281,10 +291,13 @@ def main():
                 prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
                           "จากนั้นเล่นทั้งวัน ก่อนนอนให้เขียน journal (diary, lessons, plan) แล้วเข้านอนด้วย go_to_bed")
                 prompt = memory.with_reminder(prompt, state, log_dir)
+                # The previous day ended by passing out: say what happened and ask for that day's journal first.
+                prompt = pass_out.with_morning_notice(prompt, state, lambda d: last_actions(log_dir, d))
             else:
                 prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
                           f"{last_actions(log_dir, day)}\n\n{memory.continuation_context(log_dir, day)}\n\n"
                           "เช็ก status แล้วเล่นต่อจนถึงเวลานอน (เขียน journal ถ้ายังไม่ได้เขียน แล้วเข้านอนด้วย go_to_bed)")
+                prompt += pass_out.pending_reminder(game_state())
             run_session(args, out_dir, day, prompt, system_prompt, part)
             time.sleep(3)
             s = wait_ready()
@@ -293,11 +306,16 @@ def main():
             print(f"  day {day} not finished after part {part}; continuing")
 
         s = wait_ready()
-        if s["day"] > day:
+        if s["day"] <= day:
+            # Every session of the day is used and the farmer is still up. The mod keeps the world frozen while no
+            # action runs, so release it and let the clock reach 2:00 AM: the farmer passes out and a new day starts.
+            s = pass_out.let_time_run_out(day, game_state, api_post, time.sleep, timeout=args.pass_out_timeout)
+        if s.get("ready") and s["day"] > day:
             backup_save(out_dir, day)
             days_played += 1
         else:
-            print(f"Day {day} still not finished after {args.max_parts} sessions — stopping for a human to check.")
+            print(f"Day {day} still not finished after {args.max_parts} sessions and {args.pass_out_timeout}s of released "
+                  "time — stopping for a human to check.")
             stopped_early = True
             break
 

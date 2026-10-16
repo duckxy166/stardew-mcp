@@ -12,6 +12,8 @@ namespace StardewMCP.Agent;
 /// An AI seat is "thinking" when its MCP client has connected and it has no action running.
 /// In split-screen the whole world stops (host pause: clock, farmers, NPCs); in a single-player
 /// run only the clock stops, as before. Runs on the host screen's tick.
+/// A seat the runner has released (<see cref="PlayerSlot.Released"/>, #22) never counts as thinking, so the clock runs on
+/// until its farmer passes out.
 /// </summary>
 public static class WorldClock
 {
@@ -64,7 +66,7 @@ public static class WorldClock
         var watch = _thinking[slot.Screen];
         bool candidate = slot.Role == SeatRole.Ai && !slot.Runtime.ActionRunning &&
                          (split ? slot.Connected && slot.Active : slot.Screen == 0);
-        if (!candidate || slot.TimedOut)
+        if (!candidate || slot.TimedOut || slot.Released)
         {
             watch.Reset();
             return false;

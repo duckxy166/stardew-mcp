@@ -29,6 +29,7 @@ public class ModEntry : Mod
         AgentTools.Config = _config;
         Players.Init(helper, Monitor, _config, _log);
         WorldClock.Init(_config);
+        PassOut.Init(_log);
         SplitScreen.Init(helper, Monitor, _config);
         SplitScreenPatches.Apply(ModManifest, _config);
         SocialTools.Apply(ModManifest);
@@ -37,7 +38,11 @@ public class ModEntry : Mod
 
         helper.Events.GameLoop.GameLaunched += (_, _) => _http.Start(_config.HttpPort);
         helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
-        helper.Events.GameLoop.ReturnedToTitle += (_, _) => SplitScreen.OnReturnedToTitle();
+        helper.Events.GameLoop.ReturnedToTitle += (_, _) =>
+        {
+            SplitScreen.OnReturnedToTitle();
+            PassOut.OnReturnedToTitle();
+        };
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
 
         helper.ConsoleCommands.Add(
