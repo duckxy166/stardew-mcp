@@ -102,6 +102,9 @@ mod/StardewMCP/
     AgentTools.cs      Tool definitions (ToolDef) and their coroutines
     MenuTools.cs       menu: reads any open menu and clicks it through per-menu adapters (part of AgentTools)
     SocialTools.cs     say / whisper / emote / give / plan board; per-seat inbox appended to the next tool result
+    EconomyTools.cs    claim / unclaim / pay (a macro over Lewis's ledger book) (part of AgentTools)
+    Ownership.cs       Who owns which chest, machine and plot; `theft` log entry + C# event when another seat takes from it
+    FarmRules.cs       Startup check of the save (co-op, separate wallets, 3 cabins) and the bedtime reminder
     WorldText.cs       Text renderings of status / surroundings / inventory for the model
     AgentLog.cs        Per-day JSONL logs and diaries
     ModConfig.cs       config.json settings

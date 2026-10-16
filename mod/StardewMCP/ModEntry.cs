@@ -29,6 +29,8 @@ public class ModEntry : Mod
         AgentTools.Config = _config;
         Players.Init(helper, Monitor, _config, _log);
         WorldClock.Init(_config);
+        Ownership.Init(Path.Combine(helper.DirectoryPath, "data"), Monitor);
+        FarmRules.Init(Monitor, _config);
         SplitScreen.Init(helper, Monitor, _config);
         SplitScreenPatches.Apply(ModManifest, _config);
         SocialTools.Apply(ModManifest);
@@ -77,12 +79,14 @@ public class ModEntry : Mod
         SplitScreen.ScreenTick();
 
         seat.Runtime.Tick();
+        FarmRules.SeatTick(seat);
         if (e.IsMultipleOf(15))
             seat.State = ScreenState.Capture();
 
         if (seat.Screen == 0)
         {
             WorldClock.Tick();
+            FarmRules.HostTick(e.IsMultipleOf(15));
             if (e.IsMultipleOf(15))
                 _http.RefreshState();
         }

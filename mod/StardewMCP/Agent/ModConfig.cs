@@ -44,4 +44,10 @@ public class ModConfig
 
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
+
+    /// <summary>
+    /// Game time (HHMM, 2400 = midnight) from which an AI that is not in bed gets one reminder a day, and status
+    /// shows who is in bed. The game itself passes everyone out at 02:00. 0 = off; values outside 1800-2550 count as off.
+    /// </summary>
+    public int BedtimeWarnTime { get; set; } = 2400;
 }

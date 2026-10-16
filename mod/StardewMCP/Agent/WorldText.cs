@@ -46,6 +46,9 @@ public static class WorldText
             var quests = p.questLog.Where(q => q != null && !q.completed.Value).Select(q => q.GetName()).Take(4).ToList();
             if (quests.Count > 0) sb.AppendLine($"Active quests: {string.Join(" | ", quests)}");
         }
+        sb.AppendLine(Ownership.SummaryFor(AgentTools.Rt.Log.Player));
+        var sleep = FarmRules.SleepLine();
+        if (sleep.Length > 0) sb.AppendLine(sleep);
         sb.Append(MenuState());
         return sb.ToString().TrimEnd();
     }
@@ -170,10 +173,10 @@ public static class WorldText
             if (obj is Chest chest)
             {
                 if (chest.giftbox.Value) return ('O', "Gift box (open it with interact)");
-                if (chest.playerChest.Value) return ('O', $"Chest ({chest.Items.Count(i => i != null)} items — interact, then menu take/put)");
+                if (chest.playerChest.Value) return ('O', $"Chest ({Ownership.Tag(loc, x, y)}{chest.Items.Count(i => i != null)} items — interact, then menu take/put)");
             }
             var held = obj.heldObject.Value != null ? $" (holding {obj.heldObject.Value.DisplayName}{(obj.readyForHarvest.Value ? ", READY" : "")})" : "";
-            return ('O', obj.DisplayName + held);
+            return ('O', obj.DisplayName + held + Ownership.Suffix(loc, x, y));
         }
 
         foreach (var clump in loc.resourceClumps)
@@ -189,12 +192,13 @@ public static class WorldText
                 case FruitTree ft:
                     return ('Y', "Fruit tree");
                 case HoeDirt dirt:
-                    if (dirt.crop == null) return ('=', null);
+                    var plotOwner = Ownership.Suffix(loc, x, y);
+                    if (dirt.crop == null) return ('=', plotOwner.Length > 0 ? "tilled soil" + plotOwner : null);
                     var crop = dirt.crop;
                     var cname = CropName(crop);
-                    if (crop.dead.Value) return ('x', $"dead {cname}");
-                    if (dirt.readyForHarvest()) return ('!', $"{cname} READY");
-                    return dirt.isWatered() ? ('C', cname) : ('c', $"{cname} (dry)");
+                    if (crop.dead.Value) return ('x', $"dead {cname}{plotOwner}");
+                    if (dirt.readyForHarvest()) return ('!', $"{cname} READY{plotOwner}");
+                    return dirt.isWatered() ? ('C', cname + plotOwner) : ('c', $"{cname} (dry){plotOwner}");
                 case Grass:
                     return ('g', null);
             }

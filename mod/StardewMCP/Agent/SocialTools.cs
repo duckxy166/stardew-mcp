@@ -152,16 +152,16 @@ public static class SocialTools
 
     private static string Me => AgentTools.Rt.Log.Player;
 
-    private static string? NameOf(PlayerSlot s) => (s.State as ScreenState)?.Name;
+    internal static string? NameOf(PlayerSlot s) => (s.State as ScreenState)?.Name;
 
     /// <summary>"Gemini (p2)": how players refer to each other.</summary>
-    private static string Label(PlayerSlot s) => $"{NameOf(s) ?? "?"} ({s.Id})";
+    internal static string Label(PlayerSlot s) => $"{NameOf(s) ?? "?"} ({s.Id})";
 
     private static IEnumerable<PlayerSlot> OtherAis() =>
         Players.Slots.Where(s => s.Role == SeatRole.Ai && s.Id != Me && s.Active && NameOf(s) != null);
 
     /// <summary>The AI seat named by <paramref name="to"/> (id or name); otherwise fails <paramref name="c"/> with the valid choices.</summary>
-    private static PlayerSlot? Target(string to, CallContext c)
+    internal static PlayerSlot? Target(string to, CallContext c)
     {
         to = to.Trim();
         var seat = OtherAis().FirstOrDefault(s => s.Id.Equals(to, StringComparison.OrdinalIgnoreCase) ||
@@ -177,7 +177,7 @@ public static class SocialTools
 
     // ------------------------------------------------------------------ inbox
 
-    private static void Deliver(PlayerSlot to, string line)
+    internal static void Deliver(PlayerSlot to, string line)
     {
         var q = Inbox.GetOrAdd(to.Id, _ => new());
         q.Enqueue(line);
