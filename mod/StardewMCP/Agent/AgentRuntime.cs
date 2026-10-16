@@ -172,6 +172,9 @@ public class AgentRuntime
 
     private void Step()
     {
+        // Spike #37: while the host has paused the world, running actions do not advance (observations still run).
+        if (!_current!.Tool.Instant && Context.IsWorldReady && Game1.HostPaused)
+            return;
         _ticksInCall++;
         if (_ticksInCall > 60 * 60 * 6)
         {

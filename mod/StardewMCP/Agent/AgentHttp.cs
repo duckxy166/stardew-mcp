@@ -83,6 +83,16 @@ public class AgentHttp
         try
         {
             var path = req.Url?.AbsolutePath.TrimEnd('/') ?? "";
+            if (_rt.Config.EnableDebugApi && path.StartsWith("/api/debug/spike/"))
+            {
+                await HandleSpikeControl(req, res, path.Substring("/api/debug/spike/".Length));
+                return;
+            }
+            if (_rt.Config.EnableDebugApi && path.StartsWith("/api/debug/p") && path.Length > 13 && path[13] == '/')
+            {
+                await HandleSpikePlayer(req, res, path[12] - '1', path.Substring(14));
+                return;
+            }
             if (path.StartsWith("/api/debug/"))
             {
                 await HandleDebug(req, res, path.Substring("/api/debug/".Length));
@@ -168,6 +178,38 @@ public class AgentHttp
 
         var (ok, text) = await _rt.Enqueue(tool, args);
         await Json(res, new { ok, text });
+    }
+
+    // ------------------------------------------------------------------ spike #37 (split-screen)
+
+    private static async Task<JsonElement> Body(HttpListenerRequest req)
+    {
+        using var r = new StreamReader(req.InputStream, Encoding.UTF8);
+        var body = await r.ReadToEndAsync();
+        return JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body).RootElement.Clone();
+    }
+
+    private async Task HandleSpikeControl(HttpListenerRequest req, HttpListenerResponse res, string op)
+    {
+        var args = await Body(req);
+        await Json(res, await SplitScreenSpike.Control(() => SplitScreenSpike.RunOp(op, args)));
+    }
+
+    /// <summary>POST /api/debug/p{N}/{tool}: run an MCP tool or debug op on screen N-1.</summary>
+    private async Task HandleSpikePlayer(HttpListenerRequest req, HttpListenerResponse res, int screen, string name)
+    {
+        var rt = screen >= 0 && screen < 4 ? SplitScreenSpike.Runtimes[screen] : null;
+        ToolDef? tool = name == "spike_dialogue" ? SplitScreenSpike.DialogueOp : null;
+        if (rt == null || !(tool != null || _tools.TryGetValue(name, out tool) || _debug.TryGetValue(name, out tool)))
+        {
+            res.StatusCode = 404;
+            res.Close();
+            return;
+        }
+        var args = await Body(req);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var (ok, text) = await rt.Enqueue(tool!, args);
+        await Json(res, new { ok, text, ms = sw.ElapsedMilliseconds });
     }
 
     // ------------------------------------------------------------------ MCP

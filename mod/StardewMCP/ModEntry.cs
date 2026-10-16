@@ -27,11 +27,13 @@ public class ModEntry : Mod
 
         _agent = new AgentRuntime(helper, Monitor, _config, new AgentLog(logDir, Monitor));
         AgentTools.Rt = _agent;
+        SplitScreenSpike.Init(helper, Monitor, _config, logDir, _agent);
         _http = new AgentHttp(_agent, Monitor, Path.Combine(helper.DirectoryPath, "assets"));
 
         helper.Events.GameLoop.GameLaunched += (_, _) => _http.Start(_config.HttpPort);
         helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
+        helper.Events.Display.Rendered += (_, _) => SplitScreenSpike.OnRendered();
 
         helper.ConsoleCommands.Add(
             "mcp_freeze",
@@ -51,10 +53,19 @@ public class ModEntry : Mod
 
     private void OnUpdateTicked(object? sender, UpdateTickedEventArgs e)
     {
-        TryAutoLoad(e.Ticks);
-        DebugApi.Tick();
-        _agent.Tick();
-        if (e.IsMultipleOf(15))
+        // Spike #37: SMAPI raises UpdateTicked once per split-screen screen; tick that screen's runtime.
+        int screen = Context.ScreenId;
+        if (screen == 0)
+        {
+            TryAutoLoad(e.Ticks);
+            DebugApi.Tick();
+        }
+        SplitScreenSpike.Tick(e.Ticks);
+        var rt = SplitScreenSpike.Runtimes[screen]!;
+        AgentTools.Rt = rt;
+        rt.Tick();
+        AgentTools.Rt = _agent;
+        if (screen == 0 && e.IsMultipleOf(15))
             _http.RefreshState();
     }
 
