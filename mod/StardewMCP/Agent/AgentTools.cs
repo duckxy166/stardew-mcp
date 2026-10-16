@@ -225,7 +225,8 @@ public static partial class AgentTools
             new()
             {
                 Name = "close_menu",
-                Description = "Close the open menu, shop, letter or dialogue.",
+                Description = "Close the open menu, shop, letter or dialogue. Closing a letter accepts its quest and hands over its attachments; " +
+                              "closing a treasure or gift menu first takes whatever fits in your inventory (chests keep their items).",
                 Schema = Obj(new { }),
                 Run = CloseMenu
             },
@@ -795,13 +796,18 @@ public static partial class AgentTools
     private static IEnumerator CloseMenu(JsonElement a, CallContext c)
     {
         if (Game1.activeClickableMenu == null) { c.Result = "No menu open."; yield break; }
-        if (Game1.activeClickableMenu is DialogueBox box)
-            box.closeDialogue();
-        else
-            Game1.activeClickableMenu.exitThisMenu();
-        yield return Ticks(20);
-        if (Game1.activeClickableMenu != null) Game1.exitActiveMenu();
-        c.Result = "Menu closed.";
+        var notes = new List<string>();
+        yield return ClaimBeforeClose(Game1.activeClickableMenu, notes);
+        if (Game1.activeClickableMenu != null)
+        {
+            if (Game1.activeClickableMenu is DialogueBox box)
+                box.closeDialogue();
+            else
+                Game1.activeClickableMenu.exitThisMenu();
+            yield return Ticks(20);
+            if (Game1.activeClickableMenu != null) Game1.exitActiveMenu();
+        }
+        c.Result = string.Join(" ", notes.Prepend("Menu closed."));
     }
 
     // ------------------------------------------------------------------ travel

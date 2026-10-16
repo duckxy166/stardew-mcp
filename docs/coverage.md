@@ -71,7 +71,7 @@ Rules:
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
 | Pass out (2:00, no energy) | automatic | | 🟡 | #22 |
 | TV: weather, luck, recipes | action on the TV → question | `interact` + `respond` | 🟡 untested | #14 |
-| Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
+| Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `look` labels the tile ("Backpack upgrade to 24 slots (2000g…)"), then `interact` + `respond` | 🟡 smoke `backpack` added, not yet run | #2 |
 | Totems, books | action button while holding the item (`performUseAction`) | `interact(holding)` without a tile | ✅ totems (smoke `totem`); 🟡 books untested | |
 | Animal care | pet (action), milk/shear (tool), hay (hopper) | `interact`, `use_tool` | 🟡 | #10 |
 | Horse | stable, name, mount (action) | `interact` | 🟡 riding untested | #10 |
@@ -82,7 +82,7 @@ Rules:
 |---|---|---|---|---|
 | Buy | shop counter → `ShopMenu` | `shop_list`, `buy` | ✅ (PR #45: `tryToPurchaseItem`, recipes, trade items) | #7 |
 | Sell to a shop | click an inventory item in `ShopMenu` | `menu sell` | ❌ | #11 |
-| Tool upgrades | `Blacksmith` → `Blacksmith_Upgrade` → `ShopMenu` | `buy` | 🟡 needs PR #45 (trade items) | #2 |
+| Tool upgrades | `Blacksmith` → `Blacksmith_Upgrade` → `ShopMenu` | `buy` (trade items, PR #45) | 🟡 smoke `tool_upgrade` added, not yet run; the two-day wait and pickup are untested | #2 |
 | Geodes | `Blacksmith_Process` → `GeodeMenu` | menu adapter | ❌ | #14 |
 | Crafting | crafting tab or `Craft` tile → `CraftingPage` | `menu craft` | ❌ | #3 |
 | Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
@@ -102,7 +102,7 @@ Rules:
 | Dating, marriage | give a bouquet, later a Mermaid Pendant | `talk_to(gift_item)` | 🟡 untested | |
 | Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
-| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
+| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed; 🟡 `close_menu` also accepts the letter's quest (`AcceptQuest`), untested | #2 |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
 | Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
@@ -145,6 +145,8 @@ What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselv
 |---|---|---|
 | `ShippingMenu`, `LevelUpMenu` with no choice | clicks OK | keep |
 | `LevelUpMenu` profession | picks the left one | the AI chooses (#8, PR #47) |
+| Letter with a quest | `close_menu` accepts the quest | the AI chooses |
+| `ItemGrabMenu` that is not a chest (fishing treasure, gift, fish pond output) | `close_menu` first takes what fits and names what is left | keep; `menu take` picks single items |
 | `NamingMenu` | random name | the AI types a name |
 | Question in a cutscene | skips the event, then answers option 0 | the AI answers with `respond` |
 | `PendingProposalDialog` | not handled | the AI accepts or declines |

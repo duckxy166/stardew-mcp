@@ -292,6 +292,28 @@ def open_shop(location: str, hhmm: int) -> str:
     raise Smoke(f"no action tile in {location} opened a shop (tried {counters[:6]})")
 
 
+def pack_slots(inventory_text: str) -> int:
+    """Pack size from the `inventory` tool: 'Money 500g · inventory (3/12 slots used):'."""
+    m = re.search(r"inventory \(\d+/(\d+) slots used\)", inventory_text)
+    if not m:
+        raise Smoke(f"inventory shows no pack size: {inventory_text.splitlines()[0]}")
+    return int(m.group(1))
+
+
+# Object ids of the bars Clint asks for in a tool upgrade.
+BAR_IDS = {"Copper Bar": "334", "Iron Bar": "335", "Gold Bar": "336", "Iridium Bar": "337"}
+
+
+def parse_trade_listing(listing: str) -> tuple[str, int, int, str] | None:
+    """First `shop_list` line that costs gold plus a trade item: (name, gold, count, trade item), else None.
+
+    Lines look like '  Copper Axe: 2000g + 5x Copper Bar' (a stock suffix may follow)."""
+    m = re.search(r"^\s+(.+?): (\d+)g \+ (\d+)x (.+?)(?: \(stock \d+\))?\s*$", listing, re.M)
+    if not m:
+        return None
+    return m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
+
+
 def fresh_state() -> dict:
     """/api/state is a snapshot refreshed about 4 times a second; wait for it to catch up after a tool call."""
     time.sleep(0.6)
@@ -427,6 +449,71 @@ def buy_recipe():
     if fresh_state().get("money", money) >= money:
         raise Smoke("money did not drop after buying a recipe")
     ok("close_menu")
+
+
+@case("backpack")
+def backpack():
+    """#2: the backpack is Pierre's BuyBackpack tile, not a shop item: look labels it, interact asks, respond buys."""
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; run the gate on another day")
+    reset("Farm")
+    slots = pack_slots(ok("inventory"))
+    if slots >= 36:
+        raise SkipCase("the pack already has 36 slots; run the gate on an earlier save")
+    price = 2000 if slots == 12 else 10000
+    debug("set_money", n=price + 500)
+    debug("set_time", time=1000)
+    ok("travel_to", location="SeedShop", reason="smoke test")
+    try:
+        tiles = [(label, t) for label, ts in parse_things(ok("look", radius=12), "A") if label.startswith("Backpack upgrade") for t in ts]
+        if not tiles:
+            raise Smoke("look shows no 'Backpack upgrade' tile in Pierre's shop")
+        label, (x, y) = tiles[0]
+        if f"{price}g" not in label:
+            raise Smoke(f"the tile label should show the {price}g price: {label}")
+        ok("interact", x=x, y=y, reason="smoke test")
+        options = question_options()
+        purchase = next((i for text, i in options.items() if "purchase" in text.lower()), None)
+        if purchase is None:
+            raise Smoke(f"no Purchase option in the backpack question: {options}")
+        ok("respond", option=purchase, reason="smoke test")
+        t0 = time.time()
+        while pack_slots(ok("inventory")) == slots and time.time() - t0 < 8:
+            time.sleep(0.5)
+        now = pack_slots(ok("inventory"))
+        if now != slots + 12:
+            raise Smoke(f"expected {slots + 12} slots after the purchase, have {now}")
+        if fresh_state().get("money") != 500:
+            raise Smoke(f"expected {price}g spent (500g left), money is {fresh_state().get('money')}g")
+    finally:
+        call("close_menu")
+
+
+@case("tool_upgrade")
+def tool_upgrade():
+    """#2/#7: Clint's upgrade shop asks for gold plus bars (a trade item); buy pays both through the game's own purchase."""
+    reset("Farm")
+    debug("set_money", n=30000)
+    try:
+        debug("open_shop", id="ClintUpgrade")  # set_time doesn't move Clint to the counter
+    except Smoke as e:
+        raise SkipCase(f"could not open the upgrade shop here: {e}")
+    try:
+        found = parse_trade_listing(ok("shop_list"))
+        if not found:
+            raise SkipCase("Clint offers no upgrade with a trade item (every tool already upgraded?)")
+        name, gold, count, bar = found
+        if bar not in BAR_IDS:
+            raise SkipCase(f"unknown trade item {bar}")
+        debug("add_item", id=f"(O){BAR_IDS[bar]}", qty=count)
+        bars, money = inventory_count(bar), fresh_state().get("money")
+        ok("buy", item=name, quantity=1, reason="smoke test")
+        if inventory_count(bar) != bars - count:
+            raise Smoke(f"expected {count} {bar} taken as payment, {bars} -> {inventory_count(bar)}")
+        if fresh_state().get("money") != money - gold:
+            raise Smoke(f"expected {gold}g spent, money {money} -> {fresh_state().get('money')}")
+    finally:
+        call("close_menu")
 
 
 @case("choose_profession")
@@ -814,7 +901,7 @@ def send_money():
         call("close_menu")
 
 
-CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
+CASES.append(Case("clint_pickup", lambda: None, skip="the two-day wait and Clint's counter pickup are not automated yet (#2)"))
 
 
 # ---------------------------------------------------------------------- runner

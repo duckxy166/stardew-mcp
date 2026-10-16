@@ -52,7 +52,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `think` | Post a thought (shown on the overlay, costs no game time) |
 | `walk_to`, `travel_to` | Pathfind to a tile, or to another location |
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
-| `interact`, `talk_to`, `respond`, `close_menu` | Objects, villagers, dialogue and menus; `interact` can hold an item first (load a machine, use a totem) |
+| `interact`, `talk_to`, `respond`, `close_menu` | Objects, villagers, dialogue and menus; `interact` can hold an item first (load a machine, use a totem); `close_menu` accepts a letter's quest and takes treasure or gift items that fit |
 | `menu` | Read any open menu, then use it: take/put (chests), choose (mine elevator), amount (send money), type (names), ok/cancel, or click a listed button |
 | `shop_list`, `buy`, `ship`, `eat` | Shopping, shipping bin, food |
 | `wait`, `go_to_bed` | Let time pass, end the day |

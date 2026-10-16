@@ -213,7 +213,7 @@ public static class WorldText
         }
 
         var action = loc.doesTileHaveProperty(x, y, "Action", "Buildings");
-        if (action != null) return ('A', action);
+        if (action != null) return ('A', ActionTiles.Label(action));
 
         if (loc.isWaterTile(x, y)) return ('~', null);
 
