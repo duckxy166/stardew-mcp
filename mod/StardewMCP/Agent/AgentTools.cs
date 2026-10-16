@@ -144,10 +144,16 @@ public static partial class AgentTools
             new()
             {
                 Name = "look",
-                Description = "ASCII map of the area around you with coordinates, plus a list of everything in view (trees, stones, crops, doors, villagers...) with exact (x,y) tiles. Use it to choose targets.",
-                Schema = Obj(new { radius = Int("Tiles around you, 5-20 (default 12)") }),
+                Description = "ASCII map of the area around you with coordinates, plus a list of everything in view (trees, stones, crops, doors, villagers...) with exact (x,y) tiles. Use it to choose targets. " +
+                              "Keep it small: the default radius is 8, kinds limits the list to what you need, and diff=true reports only the tiles that changed since your last look (use it to check the result of your work).",
+                Schema = Obj(new
+                {
+                    radius = Int($"Tiles around you, 5-20 (default {Observation.DefaultRadius})"),
+                    kinds = new { type = "array", description = $"Only list these kinds of things: {Observation.KindNames} (default: all). The map itself is always complete.", items = new { type = "string" } },
+                    diff = new { type = "boolean", description = "Only report the tiles that changed since your last look on this map (falls back to the full view when there is nothing to compare with)" }
+                }),
                 Instant = true,
-                Run = (a, c) => Instant(c, WorldText.Look(Math.Clamp(I(a, "radius", 12), 5, 20)))
+                Run = (a, c) => Instant(c, WorldText.Look(Math.Clamp(I(a, "radius", Observation.DefaultRadius), 5, 20), Observation.Kinds(a), Observation.Flag(a, "diff")))
             },
             new()
             {

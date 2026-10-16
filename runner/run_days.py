@@ -10,6 +10,8 @@ Each day:
   * runs `claude -p` with only the in-game MCP server (http://localhost:8770/mcp),
   * saves Claude's full stream-json transcript next to the game logs (proof of a real run),
   * continues the same day in a new session if Haiku stopped before sleeping,
+  * splits a long day into parts on purpose (planned session breaks from the mod, see sessions.py; they do
+    not count toward --max-parts) and logs the tokens of every part to <out>/usage.csv (see usage_log.py),
   * backs up the save folder after the day ends.
 
 Before the first day it runs runner/smoke.py (LLM-free tool checks on a copy of the save) and stops if
@@ -28,6 +30,9 @@ import time
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+
+import sessions
+import usage_log
 
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
@@ -105,9 +110,10 @@ def save_folder() -> Path | None:
     return max(cands, key=lambda p: p.stat().st_mtime)  # the save just written
 
 
-def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, part: int) -> int:
+def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, part: int) -> sessions.PartResult:
     mcp_cfg = out_dir / "mcp.json"
-    mcp_cfg.write_text(json.dumps({"mcpServers": {"stardew": {"type": "http", "url": f"{API}/mcp"}}}), encoding="utf-8")
+    mcp_url = sessions.mcp_url(API, breaks=not args.no_session_breaks)
+    mcp_cfg.write_text(json.dumps({"mcpServers": {"stardew": {"type": "http", "url": mcp_url}}}), encoding="utf-8")
     sys_file = out_dir / f"system_day_{day:03}.md"
     sys_file.write_text(system_prompt, encoding="utf-8")
 
@@ -133,6 +139,8 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
     print(f"[{datetime.now():%H:%M:%S}] day {day} part {part}: starting {args.model}")
     session_id = ""
     tool_calls = 0
+    tracker = usage_log.UsageTracker()
+    game_start, t_start = game_state().get("time", ""), time.time()
     with transcript.open("w", encoding="utf-8") as tf:
         proc = subprocess.Popen(cmd, cwd=workdir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace", shell=False)
@@ -145,6 +153,7 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
             except json.JSONDecodeError:
                 print("  " + line.rstrip())
                 continue
+            tracker.feed(ev)
             if ev.get("type") == "system" and ev.get("subtype") == "init":
                 session_id = ev.get("session_id", "")
                 model = ev.get("model", args.model)
@@ -168,7 +177,12 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
                 if ev.get("is_error") and tool_calls == 0:
                     raise SystemExit(f"Claude error, stopping: {ev.get('result')}")
         proc.wait()
-    return tool_calls
+    row = tracker.row(day, part, game_start, game_state().get("time", ""), time.time() - t_start)
+    usage_log.append_row(out_dir / "usage.csv", row)
+    print(f"  usage: {row['total_tokens']:,} tokens (in {row['input_tokens']:,} · out {row['output_tokens']:,} · "
+          f"cache read {row['cache_read_input_tokens']:,}), peak context {row['peak_context_tokens']:,}"
+          f"{' · planned session break' if tracker.break_seen else ''}")
+    return sessions.PartResult(tool_calls, tracker.break_seen)
 
 
 def backup_save(out_dir: Path, day: int):
@@ -189,7 +203,9 @@ def main():
     ap.add_argument("--model", default="claude-haiku-5-5")
     ap.add_argument("--goal", default=DEFAULT_GOAL)
     ap.add_argument("--max-turns", type=int, default=600)
-    ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping")
+    ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping (planned session breaks do not count)")
+    ap.add_argument("--max-breaks", type=int, default=sessions.DEFAULT_MAX_BREAKS, help="Planned session breaks per day before a part counts toward --max-parts")
+    ap.add_argument("--no-session-breaks", action="store_true", help="One session per day, as before (the baseline for comparing usage.csv)")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--skip-smoke", action="store_true", help="Do not run runner/smoke.py before the batch")
     args = ap.parse_args()
@@ -215,23 +231,28 @@ def main():
             break
 
         system_prompt = template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
-        for part in range(1, args.max_parts + 1):
+        parts, planned = sessions.PartCounter(args.max_parts, args.max_breaks), False
+        part = 0
+        while True:
+            part += 1
             if part == 1:
                 prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
                           "จากนั้นเล่นทั้งวันจนเข้านอนด้วย go_to_bed")
             else:
-                prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
-                          f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")
-            run_session(args, out_dir, day, prompt, system_prompt, part)
+                prompt = sessions.continuation_prompt(day, log_dir, planned, recent=last_actions(log_dir, day, 8))
+            planned = run_session(args, out_dir, day, prompt, system_prompt, part).planned_break
             time.sleep(3)
             s = wait_ready()
             if s["day"] > day:
                 break
-            print(f"  day {day} not finished after part {part}; continuing")
+            print(f"  day {day} not finished after part {part}{' (planned session break)' if planned else ''}; continuing")
+            if not parts.after_part(planned):
+                break
 
         s = wait_ready()
         if s["day"] > day:
             backup_save(out_dir, day)
+            print(usage_log.day_line(out_dir / "usage.csv", day))
             days_played += 1
         else:
             print(f"Day {day} still not finished after {args.max_parts} sessions — stopping for a human to check.")

@@ -44,4 +44,20 @@ public class ModConfig
 
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
+
+    /// <summary>
+    /// Session breaks (#30): game times (HHMM) at which a seat's AI is told to continue in a new session, so old maps and
+    /// results leave its context. Only applies to MCP clients that ask for it with <c>/mcp?breaks=1</c> (runner/run_days.py does).
+    /// Empty = no time breaks.
+    /// </summary>
+    public int[] SessionBreakTimes { get; set; } = { 1200, 1800 };
+
+    /// <summary>Session breaks: also break after this many tool calls in one session. 0 = off.</summary>
+    public int SessionBreakToolCalls { get; set; } = 150;
+
+    /// <summary>Session breaks: also break once the results returned in one session add up to this many characters (about 4 per token). 0 = off.</summary>
+    public int SessionBreakResultChars { get; set; } = 120000;
+
+    /// <summary>Session breaks apply to every MCP client, not just those that connect with <c>?breaks=1</c>.</summary>
+    public bool SessionBreaksForAll { get; set; } = false;
 }

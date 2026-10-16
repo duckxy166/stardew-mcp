@@ -48,7 +48,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 
 | Tool | What it does |
 |---|---|
-| `status`, `look`, `inventory` | Read the player, surroundings and items |
+| `status`, `look`, `inventory` | Read the player, surroundings and items. `look` shows a 17x17 window (radius 8) by default; `kinds` (e.g. `["crops","debris"]`) limits the object list and `diff=true` lists only the tiles that changed since the last look |
 | `think` | Post a thought (shown on the overlay, costs no game time) |
 | `walk_to`, `travel_to` | Pathfind to a tile, or to another location |
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
@@ -85,6 +85,10 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `LockHostInput` | `true` | Split-screen: ignore the real keyboard/mouse on P1 once a save is loaded |
 | `CleanFrames` | `true` | Split-screen: frozen frames look live (no Paused banner, HUD kept), no cursors, gamepad hint or join messages |
 | `AutoZoom` | `true` | Split-screen: zoom each screen to about 20 tiles across |
+| `SessionBreakTimes` | `[1200,1800]` | Planned session breaks: from these game times a tool result carries `Session break:` and the AI is asked to continue in a new session (see below) |
+| `SessionBreakToolCalls` | `150` | Planned break after this many tool calls in one session (0 = off) |
+| `SessionBreakResultChars` | `120000` | Planned break after this many characters of tool results in one session, about 30k tokens (0 = off) |
+| `SessionBreaksForAll` | `false` | Planned breaks for every MCP client; by default only clients that connect to `/mcp?breaks=1` (what `run_days.py` does) |
 
 The SMAPI console command `mcp_freeze [on|off]` toggles time freezing at runtime.
 
@@ -113,6 +117,15 @@ The first time the game starts its local co-op server, Windows Firewall may ask 
 
 - `run_days.py` runs one Claude Code session per in-game day, keeps diaries between days and
   backs up the save. Example: `py runner/run_days.py --days 3`
+- Long days are split into parts. At the break times (and after too many calls or too much result text)
+  the mod adds a `Session break:` line to a tool result, refuses further actions, and the AI writes its
+  plan with `think` and ends its turn. `run_days.py` then starts the next part with that plan, the
+  first `think` of the day and the last results. Planned breaks do not count toward `--max-parts`
+  (`--max-breaks`, default 8, stops a loop; `--no-session-breaks` turns them off). The mod only counts
+  characters, so the token limit is an estimate.
+- Every part appends one row to `runs/usage.csv` (input, output and cache tokens, turns, tool calls,
+  peak context). `py runner/usage_log.py summary` prints a table per day with the cache hit ratio,
+  `check` compares the file with the saved transcripts, `rebuild` recreates it from them.
 - `smoke.py` runs LLM-free checks of the tools (farm loop, shop, shipping, sleep) on a copy of your
   save, then reloads your save. `run_days.py` runs it before every batch and stops if a case fails.
   It needs `"EnableDebugApi": true` in `config.json`; see `py runner/smoke.py --list`. The debug

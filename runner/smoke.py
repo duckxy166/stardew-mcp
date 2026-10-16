@@ -814,6 +814,88 @@ def send_money():
         call("close_menu")
 
 
+# ---------------------------------------------------------------------- context control (#30)
+
+
+def mcp_initialize(query: str = "") -> None:
+    """Start a new MCP session on p1, as an MCP client does first. `?breaks=1` opts that session in to session breaks."""
+    global _rpc_id
+    _rpc_id += 1
+    msg = {"jsonrpc": "2.0", "id": _rpc_id, "method": "initialize",
+           "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "smoke", "version": "0"}}}
+    reply = _request("/mcp" + query, msg)
+    if not isinstance(reply.get("result"), dict):
+        raise Smoke(f"initialize{query}: no result in reply: {str(reply)[:200]}")
+
+
+@case("look_kinds_diff")
+def look_kinds_diff():
+    """look: smaller default window, the kinds filter on the object list, and diff mode (#30)."""
+    reset("Farm")
+    full = ok("look")
+    m = re.search(r"Showing x (\d+)-(\d+), y (\d+)-(\d+)", full)
+    if not m:
+        raise Smoke(f"look has no 'Showing x..y' line:\n{full[:300]}")
+    width, height = int(m.group(2)) - int(m.group(1)) + 1, int(m.group(4)) - int(m.group(3)) + 1
+    if width > 17 or height > 17:
+        raise Smoke(f"default look window is {width}x{height}, expected at most 17x17 (radius 8)")
+
+    only = ok("look", kinds=["debris"])
+    if "Things in view, only debris" not in only:
+        raise Smoke(f"look(kinds=['debris']) did not say it is filtered:\n{only[-400:]}")
+    listed = [mm.group(1) for mm in re.finditer(r"^\s+(\S) .+ x\d+: ", only, re.M)]
+    stray = [sym for sym in listed if sym not in "WwSLs"]
+    if stray:
+        raise Smoke(f"look(kinds=['debris']) listed other things: {stray}")
+    if "unknown kinds ignored" in only:
+        raise Smoke("'debris' was reported as an unknown kind")
+    if "unknown kinds ignored: nonsense" not in ok("look", kinds=["nonsense"]):
+        raise Smoke("an unknown kind should be named in the list heading")
+
+    # diff: till three tiles near the player, then ask for what changed
+    look = ok("look")
+    me = re.search(r"You @ \((\d+),(\d+)\)", look)
+    runs = parse_tillable_runs(look, 3)
+    if not me or not runs:
+        raise Smoke("no run of 3 tillable tiles near the farm entrance")
+    px, py = int(me.group(1)), int(me.group(2))
+    tiles = min(runs, key=lambda r: abs(r[1][0] - px) + abs(r[1][1] - py))
+    ok("use_tool", tool="Hoe", tiles=tiles, reason="smoke test")
+    diff = ok("look", diff=True)
+    if "Diff: nothing earlier to compare" in diff:
+        raise Smoke(f"look(diff=true) fell back to the full view right after a look:\n{diff[:300]}")
+    if "Changes since your last look" not in diff or ", \u2192 = x3" not in diff:
+        raise Smoke(f"expected 3 tiles changing from ',' to '=', got:\n{diff[:500]}")
+    if len(diff.splitlines()) > 12:
+        raise Smoke(f"a diff of 3 tiles should be short, got {len(diff.splitlines())} lines")
+    again = ok("look", diff=True)
+    if "No changes since your last look" not in again:
+        raise Smoke(f"a second diff straight away should report no changes, got:\n{again[:300]}")
+
+
+@case("session_break")
+def session_break():
+    """A session that opted in (`/mcp?breaks=1`) gets a 'Session break:' notice at the planned time, then actions are refused (#30)."""
+    reset("Farm")
+    call("close_menu")
+    try:
+        mcp_initialize("?breaks=1")
+        ok("status")  # first call of the new session: counters restart here, at 9:00
+        debug("set_time", time=1205)
+        text = ok("look")
+        if not re.search(r"^Session break:", text, re.M):
+            raise Smoke(f"no 'Session break:' line after passing 12:00:\n{text[-400:]}")
+        good, refused = call("use_tool", tool="Hoe", tiles=[[0, 0]], reason="smoke test: should be refused by the session break")
+        if good or not refused.startswith("Session break:"):
+            raise Smoke(f"an action after the notice should be refused, got ok={good}: {refused[:200]}")
+        ok("think", text="smoke test: plan for the rest of the day")  # the AI must still be able to write its plan
+        ok("status")
+        if len([ln for ln in ok("look").splitlines() if ln.startswith("Session break:")]) != 0:
+            raise Smoke("the notice should be given once, not on every call")
+    finally:
+        mcp_initialize()  # a new session without ?breaks=1: breaks off again for the cases after this one
+
+
 CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
 
 

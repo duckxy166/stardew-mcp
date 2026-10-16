@@ -14,7 +14,7 @@ namespace StardewMCP.Agent;
 /// <summary>
 /// One HTTP listener for everything:
 ///   POST /mcp/p1..p3 MCP (JSON-RPC over streamable HTTP, JSON responses only), one per AI seat;
-///                    POST /mcp is p1 (single-player runs)
+///                    POST /mcp is p1 (single-player runs); add ?breaks=1 to get planned session breaks (SessionBreaks.cs)
 ///   GET  /overlay    OBS browser-source overlay (Thai thoughts + actions)
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
@@ -222,6 +222,7 @@ public class AgentHttp
         using (var r = new StreamReader(req.InputStream, Encoding.UTF8)) body = await r.ReadToEndAsync();
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
+        SessionBreaks.Observe(seat.Id, root, req.QueryString["breaks"]); // "initialize" starts a session; /mcp?breaks=1 opts in (#30)
 
         if (root.ValueKind == JsonValueKind.Array)
         {

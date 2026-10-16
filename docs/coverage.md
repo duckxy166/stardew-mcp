@@ -137,6 +137,20 @@ Use the game's multiplayer features first. Add mod rules only where the game has
 | Owned plots and chests | no mechanic | mod rule: a cabin and its chests belong to its owner; plots on the plan board | ❌ | #40 |
 | Sleep, festival start/end | `ReadyCheckDialog` waits for every online farmer, P4 included | AI seats wait inside their action; P4 must accept automatically | ❌ untested | #38 |
 
+### Context control (#30)
+
+What the AI reads and how long a session lasts. These are not game systems; the rows say where the
+text size comes from.
+
+| System | How it works | Covered by | Status | Issue |
+|---|---|---|---|---|
+| Map size | `WorldText.Describe` scan of a square window | `look` default radius 8 (17x17), legend limited to the symbols in view | 🟡 untested in game | #30 |
+| Object list filter | the "Things in view" list of the same scan | `look(kinds=[...])` | 🟡 untested in game | #30 |
+| What changed | per-seat snapshot of the last scan on that map | `look(diff=true)`; falls back to the full view when most of the window is new | 🟡 untested in game | #30 |
+| Result footer | `AgentTools.Footer()` (time, place, energy, money, menu, professions) | joined into one line in `AgentRuntime.Finish` | 🟡 untested in game | #30 |
+| Session break | none (the game has no such thing); `SessionBreaks.cs` adds a `Session break:` line at set times or after N calls / M characters, then refuses actions | opt-in with `/mcp?breaks=1`; `think`, observations and `go_to_bed` still work; `run_days.py` starts the next part with a handoff | 🟡 untested in game | #30 |
+| Token log | `claude -p` stream-json `result` event | `runner/usage_log.py` writes `runs/usage.csv`, one row per part | 🟡 tested on fake transcripts only | #30 |
+
 ## Choice policy
 
 What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselves.
