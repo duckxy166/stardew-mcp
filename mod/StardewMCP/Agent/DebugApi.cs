@@ -41,6 +41,7 @@ public static class DebugApi
             Op("set_time", SetTime),
             Op("add_item", AddItem),
             Op("set_money", SetMoney),
+            Op("add_mail", AddMail),
             Op("set_skill", SetSkill),
             Op("set_health", SetHealth),
             Op("set_stamina", SetStamina),
@@ -103,6 +104,16 @@ public static class DebugApi
         if (!Has(a, "n")) { c.Fail("n is required"); yield break; }
         Game1.player.Money = Math.Max(0, I(a, "n", 0));
         c.Result = $"Money set to {Game1.player.Money}g";
+        yield break;
+    }
+
+    /// <summary>Put a letter in the mailbox (any id works for the briefing and footer checks; opening it needs a real Data/Mail id).</summary>
+    private static IEnumerator AddMail(JsonElement a, CallContext c)
+    {
+        var id = S(a, "id").Trim();
+        if (id.Length == 0) { c.Fail("id is required (a mail id, e.g. \"smoke_letter\")"); yield break; }
+        Game1.player.mailbox.Add(id);
+        c.Result = $"Mailbox now holds {Game1.player.mailbox.Count} letter(s)";
         yield break;
     }
 

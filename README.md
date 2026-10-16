@@ -66,6 +66,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `http://localhost:8770/overlay` | OBS browser source (thoughts + actions) |
 | `http://localhost:8770/replay` | Day-by-day replay of the logs |
 | `http://localhost:8770/api/state` | Raw game state JSON |
+| `http://localhost:8770/api/briefing?seat=p1` | Morning briefing of one AI seat: overnight results, shipping by item, mail, weather, farm (the runner puts it in the first prompt of a day) |
 
 ## Configuration
 

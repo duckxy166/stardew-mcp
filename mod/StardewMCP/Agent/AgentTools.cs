@@ -111,6 +111,8 @@ public static partial class AgentTools
         if (menu.Length > 0) sb.Append('\n').Append(menu);
         var prof = Professions.PendingText(Rt, P);
         if (prof.Length > 0) sb.Append('\n').Append(prof);
+        var mail = Briefing.MailHint();
+        if (mail.Length > 0) sb.Append('\n').Append(mail);
         return sb.ToString();
     }
 
@@ -1147,6 +1149,7 @@ public static partial class AgentTools
         else if (Game1.activeClickableMenu != null)
             Game1.exitActiveMenu();
         Game1.dialogueUp = false;
+        Briefing.CaptureForSleep();
         P.isInBed.Value = true;
         house.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
         Rt.Log.Add("system", text: "Sleeping...");
@@ -1172,7 +1175,7 @@ public static partial class AgentTools
         }
         yield return Ticks(60);
 
-        if (Game1.Date.TotalDays <= dayBefore) { c.Fail("Tried to sleep but the day did not change."); yield break; }
+        if (Game1.Date.TotalDays <= dayBefore) { Briefing.Unseal(); c.Fail("Tried to sleep but the day did not change."); yield break; }
         Rt.Log.Add("system", text: $"New day: farm day {AgentLog.FarmDay}");
         c.Result = $"Good morning! It's now farm day {AgentLog.FarmDay}. Money {moneyBefore}g → {P.Money}g (shipping income {P.Money - moneyBefore}g). Your day is over — stop here.";
     }

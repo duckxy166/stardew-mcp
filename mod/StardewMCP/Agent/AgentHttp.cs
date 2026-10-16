@@ -18,6 +18,7 @@ namespace StardewMCP.Agent;
 ///   GET  /overlay    OBS browser-source overlay (Thai thoughts + actions)
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
+///   GET  /api/briefing?seat=p1  morning briefing of one AI seat (JSON; see Briefing.cs)
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
 ///   POST /api/debug/{op}, /api/debug/p{N}/{op}   smoke-test hooks (EnableDebugApi only)
 /// </summary>
@@ -135,6 +136,11 @@ public class AgentHttp
                     return;
                 case "/api/state":
                     await Text(res, StateJson, "application/json");
+                    return;
+                case "/api/briefing":
+                    var (briefStatus, briefBody) = await Briefing.Serve(req.QueryString["seat"], _config.SplitScreen);
+                    if (briefStatus != 200) { res.StatusCode = briefStatus; res.Close(); return; }
+                    await Text(res, briefBody, "application/json");
                     return;
                 case "/api/days":
                     await Json(res, _log.Days());
