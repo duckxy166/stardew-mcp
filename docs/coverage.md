@@ -13,7 +13,7 @@ Every system behind that handler is then covered without new code.
 
 | Input | Human | AI tool | Game entry point | Status |
 |---|---|---|---|---|
-| Move | WASD | `walk_to`, `travel_to` | pathfinder, warps, doors | ✅ |
+| Move | WASD | `walk_to`, `travel_to` | pathfinder, warps, doors | ✅ `travel_to` also takes shop owners and villagers (#9) |
 | Action button | right-click | `interact(x, y, holding?)` | `Game1.pressActionButton`: the held item's use action or eating, else `tryToCheckAt` → `GameLocation.checkAction` | ✅ `holding` picks the item; handlers that wait for a fresh press (`didPlayerJustRightClick`: chests, shipping bin, fish ponds) see it |
 | Use button | left-click | `use_tool`, `plant` | `Farmer.BeginUsingTool`, `Utility.tryToPlaceItem` | 🟡 places only on tilled soil |
 | Dialogue answer | click an option | `respond(option)` | `DialogueBox` → `answerDialogueAction` or the question's callback | ✅ |
@@ -96,9 +96,10 @@ Rules:
 
 | System | How a human does it | Covered by | Status | Issue |
 |---|---|---|---|---|
-| Talk | action on an NPC | `talk_to` | ✅ | #9 |
-| Gifts | action holding the gift | `talk_to(gift_item)` | ✅ | #9 |
-| Heart events | cutscenes with questions | skipped, then option 0 | ❌ the AI makes no choice | #9 |
+| Know the villagers | social page | `villagers` (location, hearts, counters, birthdays, tastes found out) | 🟡 untested in game | #9 |
+| Talk | action on an NPC | `talk_to` (finds the villager, travels across maps, reports points before/after) | 🟡 untested in game | #9 |
+| Gifts | action holding the gift | `talk_to(gift_item)`: reaction and taste are learned; `interact(holding)` gifts are not recorded | 🟡 untested in game | #9 |
+| Heart events | cutscenes with questions | `PlayHeartEvents` (off): story events play, stop at questions for `respond`; other events are skipped | 🟡 opt-in, untested; in split-screen the event only moves while no other AI is thinking | #9 |
 | Dating, marriage | give a bouquet, later a Mermaid Pendant | `talk_to(gift_item)` | 🟡 untested | |
 | Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
@@ -146,7 +147,7 @@ What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselv
 | `ShippingMenu`, `LevelUpMenu` with no choice | clicks OK | keep |
 | `LevelUpMenu` profession | picks the left one | the AI chooses (#8, PR #47) |
 | `NamingMenu` | random name | the AI types a name |
-| Question in a cutscene | skips the event, then answers option 0 | the AI answers with `respond` |
+| Question in a cutscene | skips the event, then answers option 0; with `PlayHeartEvents`, heart events wait for `respond` (option 0 after the think timeout) | the AI answers with `respond` for every event |
 | `PendingProposalDialog` | not handled | the AI accepts or declines |
 | `ReadyCheckDialog` | not handled | AI seats wait; P4 accepts automatically |
 | Any other menu | "Menu open: X"; `menu` lists its labelled buttons (`click`, `ok`, `cancel`) | keep |

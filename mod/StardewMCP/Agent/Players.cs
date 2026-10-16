@@ -73,6 +73,9 @@ public class ScreenState
     public string? Menu { get; init; }
     public string? Dialogue { get; init; }
 
+    /// <summary>How many gift tastes this player has found out (they are discovered by gifting, not known from the start).</summary>
+    public int KnownTastes { get; init; }
+
     /// <summary>Must run on the game thread during that screen's update.</summary>
     public static ScreenState Capture()
     {
@@ -90,7 +93,8 @@ public class ScreenState
             Energy = (int)p.Stamina,
             MaxEnergy = p.MaxStamina,
             Menu = menu?.GetType().Name,
-            Dialogue = menu is StardewValley.Menus.DialogueBox box ? box.characterDialogue?.speaker?.displayName ?? "" : null
+            Dialogue = menu is StardewValley.Menus.DialogueBox box ? box.characterDialogue?.speaker?.displayName ?? "" : null,
+            KnownTastes = NpcKnowledge.Count(p)
         };
     }
 }

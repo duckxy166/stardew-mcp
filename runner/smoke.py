@@ -337,6 +337,31 @@ def travel():
         raise Smoke(f"expected arrival on Farm, got: {text.splitlines()[0]}")
 
 
+@case("villagers")
+def villagers():
+    reset("Farm")
+    text = ok("villagers")
+    if "Villagers on farm day" not in text or "Pierre" not in text:
+        raise Smoke(f"villagers() should list the roster with Pierre: {text[:200]}")
+    one = ok("villagers", name="Pierre")
+    if "Pierre" not in one or "heart" not in one:
+        raise Smoke(f"villagers(name=Pierre) has no details: {one[:200]}")
+    good, text = call("villagers", name="Nobody Here")
+    if good:
+        raise Smoke("villagers accepted an unknown name")
+    # Pierre is never on the Farm, so go=false must say where he is instead of walking off.
+    good, text = call("talk_to", name="Pierre", go=False, reason="smoke test")
+    if good or "not on this map" not in text:
+        raise Smoke(f"talk_to(go=false) should report where Pierre is: {text[:200]}")
+    if fresh_state().get("location") != "Farm":
+        raise Smoke("talk_to(go=false) moved the farmer")
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; the shop alias part needs another day")
+    text = ok("travel_to", location="Pierre", reason="smoke test")  # a shop owner's name is a place alias
+    if "Arrived in SeedShop" not in text:
+        raise Smoke(f"travel_to(Pierre) should arrive in SeedShop, got: {text.splitlines()[0]}")
+
+
 @case("shop_buy")
 def shop_buy():
     if fresh_state().get("dayOfMonth", 0) % 7 == 3:

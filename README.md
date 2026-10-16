@@ -50,9 +50,11 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 |---|---|
 | `status`, `look`, `inventory` | Read the player, surroundings and items |
 | `think` | Post a thought (shown on the overlay, costs no game time) |
-| `walk_to`, `travel_to` | Pathfind to a tile, or to another location |
+| `walk_to`, `travel_to` | Pathfind to a tile, or to another location (a shop owner's or villager's name also works; a closed door says when it opens) |
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
-| `interact`, `talk_to`, `respond`, `close_menu` | Objects, villagers, dialogue and menus; `interact` can hold an item first (load a machine, use a totem) |
+| `interact`, `respond`, `close_menu` | Objects, dialogue and menus; `interact` can hold an item first (load a machine, use a totem) |
+| `villagers` | Everyone: where they are, hearts, talked/gifts today and this week, birthdays; with a name also the gift tastes found out so far |
+| `talk_to` | Find a villager (travels across maps unless `go=false`), talk, optionally give a gift; reports points before/after and their reaction |
 | `menu` | Read any open menu, then use it: take/put (chests), choose (mine elevator), amount (send money), type (names), ok/cancel, or click a listed button |
 | `shop_list`, `buy`, `ship`, `eat` | Shopping, shipping bin, food |
 | `wait`, `go_to_bed` | Let time pass, end the day |
@@ -66,6 +68,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `http://localhost:8770/overlay` | OBS browser source (thoughts + actions) |
 | `http://localhost:8770/replay` | Day-by-day replay of the logs |
 | `http://localhost:8770/api/state` | Raw game state JSON |
+| `http://localhost:8770/api/relationships` | Every AI farmer's friendships (hearts, birthdays, gift tastes found out); `runner/run_days.py` turns it into `relationships.md` |
 
 ## Configuration
 
@@ -82,6 +85,8 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `SplitScreen` | `false` | Three AIs + a camera screen in split-screen co-op (see below) |
 | `FarmhandNames` | `["Gemini","GPT","Camera"]` | Farmhand names for P2, P3, P4; an existing farmhand with that name is reused |
 | `ThinkTimeoutSeconds` | `300` | Split-screen: an AI silent for longer stops holding the world frozen (0 = never) |
+| `PlayHeartEvents` | `false` | Let heart events (story cutscenes) play and stop at their questions for `respond`, instead of skipping them. Experimental, see `docs/coverage.md` |
+| `RevealGiftTastes` | `false` | `villagers(name)` shows the game's real gift tastes. Off: a farmer only knows the tastes they found out by gifting |
 | `LockHostInput` | `true` | Split-screen: ignore the real keyboard/mouse on P1 once a save is loaded |
 | `CleanFrames` | `true` | Split-screen: frozen frames look live (no Paused banner, HUD kept), no cursors, gamepad hint or join messages |
 | `AutoZoom` | `true` | Split-screen: zoom each screen to about 20 tiles across |
@@ -113,6 +118,9 @@ The first time the game starts its local co-op server, Windows Firewall may ask 
 
 - `run_days.py` runs one Claude Code session per in-game day, keeps diaries between days and
   backs up the save. Example: `py runner/run_days.py --days 3`
+- `relationships.py` (used by `run_days.py`) writes `relationships.md` next to the diaries each day from `/api/relationships`
+  and puts it in the system prompt as `{RELATIONSHIPS}`. It is generated from game data, never written by the AI.
+  Tests: `py -m pytest runner/tests`
 - `smoke.py` runs LLM-free checks of the tools (farm loop, shop, shipping, sleep) on a copy of your
   save, then reloads your save. `run_days.py` runs it before every batch and stops if a case fails.
   It needs `"EnableDebugApi": true` in `config.json`; see `py runner/smoke.py --list`. The debug

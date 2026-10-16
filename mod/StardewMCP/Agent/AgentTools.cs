@@ -118,7 +118,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(Core()));
+        return new List<ToolDef>(SocialTools.All().Concat(VillagerTools()).Concat(Core()));
     }
 
     private static List<ToolDef> Core()
@@ -210,13 +210,6 @@ public static partial class AgentTools
             },
             new()
             {
-                Name = "talk_to",
-                Description = "Walk to a villager on this map and talk to them. Optionally give them an item from your inventory as a gift.",
-                Schema = Obj(new { name = Str("Villager name, e.g. Pierre"), gift_item = Str("Optional item name to give as a gift"), reason = Str(ReasonDesc) }, "name", "reason"),
-                Run = TalkTo
-            },
-            new()
-            {
                 Name = "respond",
                 Description = "Continue the open dialogue box, or answer a question by option number.",
                 Schema = Obj(new { option = Int("Option number for questions; omit to just continue"), reason = Str(ReasonDesc) }),
@@ -233,8 +226,10 @@ public static partial class AgentTools
             new()
             {
                 Name = "travel_to",
-                Description = "Walk to another map through doors and exits: Farm, FarmHouse, BusStop, Town, SeedShop (Pierre's), Forest (Marnie), Beach, Mountain, Mine, Saloon, Blacksmith, etc. Locked doors stay locked outside opening hours.",
-                Schema = Obj(new { location = Str("Destination map name"), reason = Str(ReasonDesc) }, "location", "reason"),
+                Description = "Walk to another map through doors and exits: Farm, FarmHouse, BusStop, Town, SeedShop (Pierre's), Forest (Marnie), Beach, Mountain, Mine, Saloon, Blacksmith, etc. " +
+                              "You can also name a shop keeper (Pierre, Clint, Robin, Marnie, Willy, Gus: their shop) or any villager (the map they are in now). " +
+                              "Locked doors stay locked outside opening hours; the failure says when they open.",
+                Schema = Obj(new { location = Str("Destination map name, shop keeper or villager"), reason = Str(ReasonDesc) }, "location", "reason"),
                 Run = TravelTo
             },
             new()
@@ -725,40 +720,7 @@ public static partial class AgentTools
         c.Result = $"{what}.{changed}{moved} {Diff(before)}".Trim();
     }
 
-    private static IEnumerator TalkTo(JsonElement a, CallContext c)
-    {
-        var name = S(a, "name");
-        var npc = Loc.characters.FirstOrDefault(n => n.Name.Equals(name, StringComparison.OrdinalIgnoreCase) || n.displayName.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (npc == null) { c.Fail($"{name} is not on this map ({Loc.Name})."); yield break; }
-
-        var gift = S(a, "gift_item");
-        int giftSlot = -1;
-        if (gift.Length > 0)
-        {
-            giftSlot = FindItem(gift, it => it is SObject);
-            if (giftSlot < 0) { c.Fail($"No \"{gift}\" in inventory to gift."); yield break; }
-        }
-
-        for (int attempt = 0; attempt < 4; attempt++)
-        {
-            var sub = new CallContext();
-            yield return WalkAdjacent(npc.TilePoint, sub);
-            if (!sub.Ok) continue;
-            var me = P.TilePoint;
-            if (Math.Abs(me.X - npc.TilePoint.X) + Math.Abs(me.Y - npc.TilePoint.Y) != 1) continue; // they moved
-            Face(npc.TilePoint);
-            if (giftSlot >= 0) P.CurrentToolIndex = giftSlot;
-            else if (P.ActiveObject != null) P.CurrentToolIndex = FirstToolSlot();
-            Game1.tryToCheckAt(npc.TilePoint.ToVector2(), P);
-            yield return Ticks(20);
-            if (Game1.activeClickableMenu != null || Game1.dialogueUp)
-            {
-                c.Result = $"Talking to {npc.displayName} (friendship {P.getFriendshipHeartLevelForNPC(npc.Name)} hearts).";
-                yield break;
-            }
-        }
-        c.Fail($"Couldn't start a conversation with {npc.displayName} (they may be busy, moving, or you already talked today).");
-    }
+    // talk_to lives in NpcTools.cs (TalkToNpc).
 
     private static int FirstToolSlot()
     {
@@ -768,7 +730,13 @@ public static partial class AgentTools
 
     private static IEnumerator Respond(JsonElement a, CallContext c)
     {
-        if (Game1.activeClickableMenu is not DialogueBox box) { c.Fail("No dialogue is open."); yield break; }
+        if (Game1.activeClickableMenu is not DialogueBox box)
+        {
+            // A heart event is playing between two lines: wait for the next line or question (NpcStory.cs).
+            if (Rt.Story.Active) { yield return Rt.Story.WaitForNext(c); yield break; }
+            c.Fail("No dialogue is open.");
+            yield break;
+        }
         var startText = box.getCurrentString();
         bool question = box.isQuestion;
         int option = I(a, "option", -1);
@@ -808,11 +776,16 @@ public static partial class AgentTools
 
     private static IEnumerator TravelTo(JsonElement a, CallContext c)
     {
-        var dest = S(a, "location").Trim();
-        var target = Game1.getLocationFromName(dest);
-        if (target == null) { c.Fail($"Unknown location \"{dest}\"."); yield break; }
+        var asked = S(a, "location").Trim();
+        var (dest, note) = NpcInfo.ResolvePlace(asked); // map names, shop keepers (Pierre = SeedShop), villagers (where they are now)
+        var target = dest == null ? null : Game1.getLocationFromName(dest);
+        if (target == null)
+        {
+            c.Fail($"Unknown location \"{asked}\". Use a map name (Farm, Town, SeedShop...), a shop keeper's name (Pierre, Clint, Robin, Marnie, Willy, Gus) or any villager's name.");
+            yield break;
+        }
         yield return TravelTo(target.Name, c);
-        if (c.Ok) c.Result = $"Arrived in {Loc.Name} at ({P.TilePoint.X},{P.TilePoint.Y}).";
+        if (c.Ok) c.Result = $"Arrived in {Loc.Name} at ({P.TilePoint.X},{P.TilePoint.Y}).{(note.Length > 0 ? " " + note : "")}";
     }
 
     /// <summary>A way out of a map: a door/building door (press action on it) or an edge warp (walk off the map).</summary>
@@ -914,7 +887,7 @@ public static partial class AgentTools
             if (Loc == loc)
             {
                 var msg = Game1.activeClickableMenu != null ? WorldText.MenuState().Trim() : "the door may be locked (check opening hours)";
-                c.Fail($"Couldn't go from {loc.Name} to {next}: {msg}");
+                c.Fail($"Couldn't go from {loc.Name} to {next}: {NpcInfo.DoorHours(loc, exit.Tile, next)}{msg}");
                 yield break;
             }
             if (Loc.Name != next) { c.Fail($"Ended up in {Loc.Name} instead of {next}."); yield break; }

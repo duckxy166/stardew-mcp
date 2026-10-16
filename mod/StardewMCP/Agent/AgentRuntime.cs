@@ -56,8 +56,11 @@ public class AgentRuntime
     public ModConfig Config { get; }
     public IModHelper Helper { get; }
 
-    /// <summary>True while an action that lets game time pass is running.</summary>
-    public bool ActionRunning => _actionLane.Current is { Instant: false };
+    /// <summary>Heart events this seat plays instead of skipping them, and friendship milestones (NpcStory.cs).</summary>
+    public StoryWatcher Story { get; } = new();
+
+    /// <summary>True while an action that lets game time pass is running (or a heart event plays by itself).</summary>
+    public bool ActionRunning => _actionLane.Current is { Instant: false } || Story.Playing;
     public string? CurrentTool => _actionLane.Current?.Tool.Name;
 
     public AgentRuntime(IModHelper helper, IMonitor monitor, ModConfig config, PlayerLog log)
@@ -87,6 +90,7 @@ public class AgentRuntime
         _globalTicks++;
         AutoHandleOverlays();
         SocialTools.Tick(Log.Player);
+        Story.Tick(this);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);
     }
@@ -121,7 +125,11 @@ public class AgentRuntime
         if (Game1.eventUp && Game1.CurrentEvent != null && !Game1.CurrentEvent.isFestival)
         {
             _eventTicks++;
-            if (_eventTicks == 90)
+            if (Story.OnEvent(this))
+            {
+                // A heart event the StoryWatcher plays (opt-in PlayHeartEvents): not skipped, not auto-answered.
+            }
+            else if (_eventTicks == 90)
             {
                 Log.Add("system", text: $"Skipping cutscene ({Game1.CurrentEvent.id})");
                 Game1.CurrentEvent.skipEvent();
@@ -135,6 +143,7 @@ public class AgentRuntime
         else
         {
             _eventTicks = 0;
+            Story.OnNoEvent(this);
         }
     }
 

@@ -44,4 +44,16 @@ public class ModConfig
 
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
+
+    /// <summary>
+    /// Let villager heart events play out (their dialogue goes to the log and questions are left to the AI's respond)
+    /// instead of skipping every cutscene. Off by default until it is tested in split-screen. See NpcStory.cs.
+    /// </summary>
+    public bool PlayHeartEvents { get; set; } = false;
+
+    /// <summary>
+    /// villagers(name) shows what a villager thinks of every item you carry, straight from the game data. Off by default:
+    /// gift tastes are discovered by giving gifts (and by what other players tell you). See NpcKnowledge.cs.
+    /// </summary>
+    public bool RevealGiftTastes { get; set; } = false;
 }

@@ -18,6 +18,7 @@ namespace StardewMCP.Agent;
 ///   GET  /overlay    OBS browser-source overlay (Thai thoughts + actions)
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
+///   GET  /api/relationships  every AI farmer's friendships (the runner writes relationships.md from it)
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
 ///   POST /api/debug/{op}, /api/debug/p{N}/{op}   smoke-test hooks (EnableDebugApi only)
 /// </summary>
@@ -135,6 +136,9 @@ public class AgentHttp
                     return;
                 case "/api/state":
                     await Text(res, StateJson, "application/json");
+                    return;
+                case "/api/relationships":
+                    await Json(res, await NpcStory.ReportAsync());
                     return;
                 case "/api/days":
                     await Json(res, _log.Days());

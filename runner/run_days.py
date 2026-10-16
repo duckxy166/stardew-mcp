@@ -6,7 +6,7 @@ Usage (from a normal terminal where `claude` is logged in, with the game running
     py runner/run_days.py --until-day 100 --goal "..."
 
 Each day:
-  * builds the system prompt (rules + goal + recent diaries),
+  * builds the system prompt (rules + goal + recent diaries + relationships.md written from game data),
   * runs `claude -p` with only the in-game MCP server (http://localhost:8770/mcp),
   * saves Claude's full stream-json transcript next to the game logs (proof of a real run),
   * continues the same day in a new session if Haiku stopped before sleeping,
@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import relationships
 import shutil
 import subprocess
 import sys
@@ -214,7 +215,10 @@ def main():
         if not args.until_day and days_played >= args.days:
             break
 
-        system_prompt = template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
+        # relationships.md is written from game data (not by the AI) once per day, right before the prompt is built.
+        relationships.update(log_dir, lambda: api_get("/api/relationships"))
+        system_prompt = (template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
+                         .replace("{RELATIONSHIPS}", relationships.for_prompt(log_dir)))
         for part in range(1, args.max_parts + 1):
             if part == 1:
                 prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
