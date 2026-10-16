@@ -118,7 +118,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(Core()).Concat(CommunityTools()));
+        return new List<ToolDef>(SocialTools.All().Concat(Core()).Concat(CommunityTools()).Concat(JojaTools()));
     }
 
     private static List<ToolDef> Core()

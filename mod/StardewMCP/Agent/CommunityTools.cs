@@ -188,7 +188,8 @@ internal static class BundleReader
     public static bool HasMail(Farmer who, string id) =>
         who.mailReceived.Contains(id) || Game1.MasterPlayer.mailReceived.Contains(id);
 
-    public static bool IsJoja(Farmer who) => HasMail(who, "JojaMember");
+    /// <summary>The membership is bought (#26): received, or already queued for tomorrow's mail on the day it was bought.</summary>
+    public static bool IsJoja(Farmer who) => HasMail(who, "JojaMember") || JojaRoute.Pending(who, "JojaMember");
 
     /// <summary>Why the bundles can't be used right now, or null when they can.</summary>
     public static string? ClosedReason(Farmer who)

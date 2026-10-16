@@ -106,7 +106,7 @@ Rules:
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
 | Community Center | `JunimoNoteMenu` | `bundles` (reads `Bundles`/`BundleData`), `donate_bundle` (opens the room's `JunimoNoteMenu` and clicks the bundle, the inventory slot and an ingredient slot; success is read back from `Bundles`) | 🟡 untested, needs the CC open | #13 |
-| Joja | `JojaCDMenu` | menu adapter | ❌ | #26 |
+| Joja | Morris's membership question, `JojaCDMenu` | `joja`: `projects` lists the five projects and their state from the mail flags; `membership` shows a warning and buys nothing unless `confirm=true`, then answers Morris's yes/no dialogue (global, irreversible: closes the bundles for everyone, announced in chat, recorded on the log, the plan board and as the `joja_membership` event); `buy_project` opens the game's own `JojaCDMenu` and clicks the project's box, found by its price, so the game takes the gold and sets its own flags (`joja_project_bought` event) | 🟡 untested, JojaMart + dialogue and form members late-bound | #26 |
 | Museum | Gunther → `MuseumMenu` | `museum`: `list` via `isItemSuitableForDonation`; `donate` writes `museumPieces` on the next free display tile (not the `MuseumMenu` UI, which needs pointer coordinates); `rewards` answers Gunther's "Collect" and takes the grab menu | 🟡 untested | #13 |
 
 ### Adventure

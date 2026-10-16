@@ -671,6 +671,143 @@ def museum():
         debug("warp", location="Farm", x=x, y=y)
 
 
+# The Joja route (#26). joja_membership is irreversible for the farm, which is fine here: it only ever happens on the
+# smoke_* copy, and the original save is reloaded afterwards. It runs before joja_buy_project, which needs the membership.
+JOJA_MEMBERSHIP_PRICE = 5000
+JOJA_PROJECTS = {"Bus Repair": 40000, "Minecarts": 15000, "Bridge Repair": 25000, "Greenhouse": 35000, "Panning": 20000}
+
+
+def joja_is_member(projects_text: str) -> bool:
+    m = re.search(r"Joja membership: (not bought|bought)", projects_text)
+    if not m:
+        raise Smoke(f"joja projects does not say whether the membership is bought:\n{projects_text[:400]}")
+    return m.group(1) == "bought"
+
+
+def joja_line(projects_text: str, name: str) -> str:
+    for line in projects_text.splitlines():
+        if line.strip().startswith(f"{name} ("):
+            return line
+    raise Smoke(f"joja projects does not list {name}:\n{projects_text[:600]}")
+
+
+def reach_joja_mart() -> None:
+    good, text = call("travel_to", location="JojaMart", reason="smoke test setup")
+    if not good:
+        raise SkipCase(f"cannot reach the JojaMart now: {text.splitlines()[0][:160]}")
+
+
+@case("joja_info")
+def joja_info():
+    """joja projects lists the five projects with their prices; membership without confirm buys nothing and warns."""
+    reset("Farm")
+    text = ok("joja", action="projects")
+    for name, price in JOJA_PROJECTS.items():
+        if not re.search(rf"{re.escape(name)} \(\w+\): {price:,}g,", joja_line(text, name)):
+            raise Smoke(f"{name} should cost {price:,}g:\n{joja_line(text, name)}")
+    listed = re.findall(r"^\s+[A-Z][\w ]+ \(\w+\): [\d,]+g, ", text, re.M)
+    if len(listed) != 5:
+        raise Smoke(f"joja projects should list 5 projects, found {len(listed)}:\n{text[:600]}")
+    if joja_is_member(text):
+        raise SkipCase("this save already has the Joja membership")
+
+    money = fresh_state().get("money")
+    for args in ({"action": "membership"}, {"action": "membership", "confirm": False}):
+        good, warning = call("joja", **args)
+        if not good and "already complete" in warning:
+            raise SkipCase("the Community Center is already complete on this save")
+        if not good or "NOT BOUGHT" not in warning or "Community Center" not in warning or "LOST" not in warning:
+            raise Smoke(f"membership without confirm should only warn ({args}): {warning[:300]}")
+    if fresh_state().get("money") != money:
+        raise Smoke("membership without confirm changed the wallet")
+    if joja_is_member(ok("joja", action="projects")):
+        raise Smoke("membership without confirm bought the membership")
+    good, text = call("joja", action="buy_project", project="Minecarts", reason="smoke test")
+    if good or "membership" not in text:
+        raise Smoke(f"buy_project should need the membership first: {text[:200]}")
+    if call("joja", action="buy_project", project="Nonsense", reason="smoke test")[0]:
+        raise Smoke("buy_project accepted an unknown project")
+
+
+@case("joja_membership")
+def joja_membership():
+    """joja membership with confirm=true: Morris sells it, 5,000g leave the wallet, the bundles close for everyone, it is announced."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    if joja_is_member(ok("joja", action="projects")):
+        raise SkipCase("this save already has the Joja membership")
+    good, text = call("joja", action="membership")
+    if not good:
+        raise SkipCase(f"the membership is not available on this save: {text.splitlines()[0][:160]}")
+    reach_joja_mart()
+    try:
+        debug("set_money", n=60000)
+        good, text = call("joja", action="membership", confirm=True, reason="smoke test")
+        if not good:
+            raise Smoke(f"membership with confirm failed: {text[:400]}")
+        if "bought the Joja membership" not in text:
+            raise Smoke(f"membership did not report the purchase: {text[:300]}")
+        if fresh_state().get("money") != 60000 - JOJA_MEMBERSHIP_PRICE:
+            raise Smoke(f"the membership should cost {JOJA_MEMBERSHIP_PRICE}g; money is {fresh_state().get('money')}, was 60000")
+        if call("menu")[0]:
+            raise Smoke("a menu was left open after the membership")
+        if not joja_is_member(ok("joja", action="projects")):
+            raise Smoke("projects does not show the membership after buying it")
+        good, text = call("bundles")
+        if good or "Joja" not in text:
+            raise Smoke(f"the bundles should be closed after the membership: {text[:200]}")
+        if call("joja", action="membership", confirm=True, reason="smoke test")[0]:
+            raise Smoke("a second membership was sold")
+        board = ok("plan_read")
+        if "Community Center vs Joja" not in board or "Joja membership" not in board:
+            raise Smoke(f"the plan board has no decision section:\n{board[:500]}")
+        feed = _request("/api/feed")["entries"]
+        if not any(e.get("kind") == "joja_membership" for e in feed):
+            raise Smoke("the feed has no joja_membership event")
+        if not any(e.get("kind") == "system" and "DECISION" in (e.get("text") or "") for e in feed):
+            raise Smoke("the feed has no DECISION line")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("joja_buy_project")
+def joja_buy_project():
+    """buy_project pays the Minecarts through the game's own Joja form: 15,000g leave the wallet and the project shows as bought."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    text = ok("joja", action="projects")
+    if not joja_is_member(text):
+        raise SkipCase("needs the Joja membership (joja_membership buys it earlier in the same run)")
+    if not joja_line(text, "Minecarts").rstrip().endswith("available."):
+        raise SkipCase(f"the Minecarts are not open for purchase on this save: {joja_line(text, 'Minecarts').strip()[-60:]}")
+    reach_joja_mart()
+    try:
+        debug("set_money", n=20000)
+        text = ok("joja", action="buy_project", project="Minecarts", reason="smoke test")
+        if "Minecarts" not in text or "15,000g" not in text:
+            raise Smoke(f"buy_project did not report the Minecarts and the price: {text[:300]}")
+        if fresh_state().get("money") != 20000 - JOJA_PROJECTS["Minecarts"]:
+            raise Smoke(f"Minecarts should cost 15,000g; money is {fresh_state().get('money')}, was 20000")
+        if call("menu")[0]:
+            raise Smoke("the Joja form was left open after buy_project")
+        line = joja_line(ok("joja", action="projects"), "Minecarts").rstrip()
+        if not (line.endswith("bought, built tomorrow.") or line.endswith("built.")):
+            raise Smoke(f"projects does not show the Minecarts as bought:\n{line}")
+        if call("joja", action="buy_project", project="Minecarts", reason="smoke test")[0]:
+            raise Smoke("the Minecarts were sold twice")
+        debug("set_money", n=100)
+        good, text = call("joja", action="buy_project", project="Panning", reason="smoke test")
+        if good or "100g" not in text:
+            raise Smoke(f"buy_project with too little gold should fail and say so: {text[:200]}")
+        feed = _request("/api/feed")["entries"]
+        if not any(e.get("kind") == "joja_project_bought" for e in feed):
+            raise Smoke("the feed has no joja_project_bought event")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
 # ---------------------------------------------------------------------- multi-seat (social tools)
 # These need split-screen (SplitScreen: true in config.json) and run last: once p2/p3 have talked to the mod
 # they count as connected AIs, and an idle one holds the world frozen until it is disconnected again.

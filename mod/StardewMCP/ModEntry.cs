@@ -37,6 +37,7 @@ public class ModEntry : Mod
 
         helper.Events.GameLoop.GameLaunched += (_, _) => _http.Start(_config.HttpPort);
         helper.Events.GameLoop.SaveLoaded += OnSaveLoaded;
+        helper.Events.GameLoop.DayStarted += (_, _) => JojaRoute.OnDayStarted();
         helper.Events.GameLoop.ReturnedToTitle += (_, _) => SplitScreen.OnReturnedToTitle();
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
 
