@@ -123,6 +123,15 @@ Rules:
 | Arcade, casino, darts, crane | `IMinigame`, `CalicoJack`, `Slots` | drivers (optional) | ❌ | |
 | Desert, Skull Cavern, Ginger Island, movie theater, Qi | travel, tile actions, menus | primitives | ❌ not checked | |
 
+### Knowledge
+
+Reference tools read the game's own data (`Game1.cropData`, `Game1.objectData`, `Data/Shops`, the recipe files), so they are always right and cover modded content. They are instant observations: no game time.
+
+| System | How a human does it | Covered by | Status | Issue |
+|---|---|---|---|---|
+| Crop planning: seasons, growth, prices | the wiki, the seed shop | `crops(season?)`: last day to plant, harvests that fit, seed and sell prices, gold per tile per day | 🟡 smoke `knowledge`, not yet run in game | #16 |
+| Item facts: sell price, food, shops, recipes | the wiki, the collections tab | `item_info(name)` (objects only) | 🟡 smoke `knowledge`, not yet run in game | #16 |
+
 ### Multi-AI
 
 Use the game's multiplayer features first. Add mod rules only where the game has nothing.

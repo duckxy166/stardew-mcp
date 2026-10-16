@@ -326,6 +326,38 @@ def observe_tools():
     ok("think", text="smoke test")
 
 
+@case("knowledge")
+def knowledge():
+    """#16: crops and item_info read the game's own data. Both are instant: no game time passes."""
+    reset("Farm")
+    debug("add_item", id="(O)472", qty=3)  # Parsnip Seeds, so crops has a carried seed to mark
+    spring = ok("crops", season="spring")
+    for needle in ("Parsnip", "Cauliflower"):
+        if needle not in spring:
+            raise Smoke(f"crops(spring) has no {needle!r}:\n{spring[:600]}")
+    if "Will mature" not in spring:  # a spring season planned from day 1 always has crops that mature
+        raise Smoke(f"crops(spring) lists no crop that matures:\n{spring[:600]}")
+    if not re.search(r"you carry \d+", spring):
+        raise Smoke(f"crops(spring) does not mark the Parsnip Seeds in the inventory:\n{spring[:600]}")
+    summer = ok("crops", season="summer")
+    if "Melon" not in summer or "Cauliflower" in summer:
+        raise Smoke(f"crops(summer) should list Melon and not Cauliflower:\n{summer[:600]}")
+    ok("crops")  # the current season
+    good, text = call("crops", season="monsoon")
+    if good:
+        raise Smoke(f"crops accepted a made-up season: {text[:200]}")
+
+    info = ok("item_info", name="Parsnip")
+    if "35g" not in info:
+        raise Smoke(f"item_info Parsnip should show the 35g base price:\n{info[:600]}")
+    seeds = ok("item_info", name="Parsnip Seeds")
+    if "plants into Parsnip" not in seeds or "4 days" not in seeds:
+        raise Smoke(f"item_info Parsnip Seeds should link to the crop:\n{seeds[:600]}")
+    good, text = call("item_info", name="no such thing at all")
+    if good:
+        raise Smoke(f"item_info accepted an unknown item: {text[:200]}")
+
+
 @case("travel")
 def travel():
     reset("Farm")

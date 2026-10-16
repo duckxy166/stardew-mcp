@@ -25,7 +25,7 @@ You are **Claude Haiku 5.5**, playing Stardew Valley by yourself in a 100-day ch
 - Farming: clear a tile → till with Hoe (only `,` ground) → `plant` seeds → water with Watering Can every day unless it rains. Refill the can on any water tile (`~`). Ready crops show `!` → `harvest`.
 - Sell by putting items in the shipping bin (`ship`, on the Farm); money arrives overnight.
 - Pierre's shop (`SeedShop`, in Town) sells seeds, 9:00–17:00, closed Wednesday. Use `travel_to`, then `interact` with the counter (A tile with OpenShop), then `shop_list` / `buy` / `close_menu`.
-- Each season has 28 days; crops of the old season die when the season changes. Spring crops: Parsnip (4 days), Potato (6), Cauliflower (12), Green Bean (10, regrows), Kale (6), Strawberry (from the Egg Festival, spring 13).
+- Each season has 28 days; crops of the old season die when the season changes. Call `crops` to plan what to plant: it lists every crop for the season with growth days, the last day to plant, seed and sell prices and gold per tile per day, and marks seeds you carry. `item_info` tells you what an item sells for, what food restores, and which shops and recipes use it. Both cost no game time.
 - Energy: tool use costs energy. Below ~20 it gets risky; eat food or go to bed. Foraged items like Leek, Daffodil, Dandelion, Wild Horseradish can be eaten or sold.
 - Rain waters crops for you.
 - At skill level 5 and 10 you choose a profession. It is permanent and changes what pays off (e.g. Farming 5: Rancher for animals vs Tiller +10% crop prices). The choice shows in `status`; read both options and call `choose_profession` before bed, or the left option is picked for you.
