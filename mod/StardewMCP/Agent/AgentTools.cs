@@ -617,7 +617,9 @@ public static partial class AgentTools
             var hadFert = dirt.fertilizer.Value;
             Utility.tryToPlaceItem(loc, item, t.X * 64 + 32, t.Y * 64 + 32);
             yield return Ticks(8);
-            bool ok = (!hadCrop && dirt.crop != null) || dirt.fertilizer.Value != hadFert;
+            bool sown = !hadCrop && dirt.crop != null;
+            bool ok = sown || dirt.fertilizer.Value != hadFert;
+            if (sown) Rt.Stats.CropsPlanted(1);
             if (ok) planted++;
             else lines.Add($"({t.X},{t.Y}) could not plant {item.DisplayName} (occupied, wrong season, or not plantable here)");
         }
@@ -636,11 +638,13 @@ public static partial class AgentTools
             var sub = new CallContext();
             yield return WalkAdjacent(t, sub);
             if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
-            var label = WorldText.Describe(loc, t.X, t.Y).label;
+            var (symBefore, label) = WorldText.Describe(loc, t.X, t.Y);
             loc.checkAction(new xTile.Dimensions.Location(t.X, t.Y), Game1.viewport, P);
             yield return Ticks(20);
             yield return WaitIdle(120);
-            lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {WorldText.Describe(loc, t.X, t.Y).label ?? "empty"}");
+            var now = WorldText.Describe(loc, t.X, t.Y);
+            Rt.Stats.HarvestTile(symBefore, now.sym);
+            lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {now.label ?? "empty"}");
         }
         yield return Ticks(30);
         var diff = Diff(before);
@@ -1148,6 +1152,7 @@ public static partial class AgentTools
             Game1.exitActiveMenu();
         Game1.dialogueUp = false;
         P.isInBed.Value = true;
+        Rt.Stats.OnSleepStart();
         house.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
         Rt.Log.Add("system", text: "Sleeping...");
 

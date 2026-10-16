@@ -396,6 +396,57 @@ def ship_and_sleep():
         raise Smoke("day did not advance")
 
 
+# Fields every stats_NNN.json has (mod/StardewMCP/Agent/DayStats.cs); runner/stats.py reads them.
+STATS_FIELDS = {
+    "money": ["start", "bedtime", "end"],
+    "income": ["earned", "shippingBin"],
+    "crops": ["planted", "harvested", "died", "unwateredAtBedtime"],
+    "energy": ["bedtime"],
+    "health": ["bedtime"],
+    "toolCalls": ["total", "failed"],
+    "skills": ["farming", "mining", "foraging", "fishing", "combat"],
+    "hearts": ["total"],
+    "mine": ["deepestFloor"],
+}
+
+
+@case("daily_stats")
+def daily_stats():
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=2)  # Parsnip
+    ok("ship", item="Parsnip", quantity=2, reason="smoke test")
+    day = fresh_state().get("day")
+    ok("go_to_bed", diary="Smoke test diary: checking the daily stats.", reason="smoke test")
+
+    doc = None
+    for _ in range(30):  # the mod writes the file on the first settled tick of the new day
+        doc = _request(f"/api/stats?n={day}").get("players", {}).get("p1")
+        if doc:
+            break
+        time.sleep(0.5)
+    if not doc:
+        raise Smoke(f"/api/stats?n={day} has no p1 stats after going to bed")
+    for section, keys in STATS_FIELDS.items():
+        if not isinstance(doc.get(section), dict):
+            raise Smoke(f"stats day {day}: missing section {section}")
+        for key in keys:
+            if key not in doc[section]:
+                raise Smoke(f"stats day {day}: missing {section}.{key}")
+    for key in ("passedOut", "passOutCause", "endedBy", "partial"):
+        if key not in doc:
+            raise Smoke(f"stats day {day}: missing {key}")
+    if doc["endedBy"] != "bed" or doc["passedOut"]:
+        raise Smoke(f"stats day {day}: expected to end in bed, got endedBy={doc['endedBy']} passedOut={doc['passedOut']}")
+    if doc["toolCalls"]["total"] < 2:
+        raise Smoke(f"stats day {day}: expected the ship and go_to_bed calls to be counted, got {doc['toolCalls']['total']}")
+    if doc["income"]["shippingBin"] <= 0:
+        raise Smoke(f"stats day {day}: shipped parsnips but the bin value is {doc['income']['shippingBin']}")
+    if doc["income"]["earned"] <= 0:
+        raise Smoke(f"stats day {day}: expected income from the shipped parsnips, got {doc['income']['earned']}")
+    if day not in _request("/api/stats").get("days", []):
+        raise Smoke(f"/api/stats does not list day {day}")
+
+
 @case("buy_recipe")
 def buy_recipe():
     """#7: a bought recipe is learned, not handed over as the dish."""
