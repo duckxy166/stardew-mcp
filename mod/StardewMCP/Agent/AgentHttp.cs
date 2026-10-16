@@ -19,6 +19,7 @@ namespace StardewMCP.Agent;
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
+///   GET/POST /api/control   run control: pause, resume, stop_after_day, stop_now, clear_stop
 ///   POST /api/debug/{op}, /api/debug/p{N}/{op}   smoke-test hooks (EnableDebugApi only)
 /// </summary>
 public class AgentHttp
@@ -135,6 +136,16 @@ public class AgentHttp
                     return;
                 case "/api/state":
                     await Text(res, StateJson, "application/json");
+                    return;
+                case "/api/control":
+                    // pause | resume | stop_after_day | stop_now | clear_stop (GET reads the flags)
+                    var controlBody = "";
+                    if (req.HttpMethod == "POST")
+                        using (var cr = new StreamReader(req.InputStream, Encoding.UTF8))
+                            controlBody = await cr.ReadToEndAsync();
+                    var control = RunControl.Handle(req.HttpMethod, controlBody);
+                    res.StatusCode = control.Ok ? 200 : 400;
+                    await Json(res, control.Body);
                     return;
                 case "/api/days":
                     await Json(res, _log.Days());
@@ -353,6 +364,10 @@ public class AgentHttp
                 ? new { speaker = box.characterDialogue?.speaker?.displayName, question = box.isQuestion }
                 : null,
             screens = GameRunner.instance.gameInstances.Count,
+            // Run control (RunControl.cs). A watchdog must not read a paused game as hung.
+            paused = RunControl.Paused,
+            stopAfterDay = RunControl.StopAfterDay,
+            stopNow = RunControl.StopNow,
             plan = PlanBoard.Snapshot(),
             players
         }, AgentLog.Json);

@@ -30,6 +30,9 @@ public class PendingCall
     public JsonElement Args;
     /// <summary>Observes only: keeps the world frozen and may answer during the seat's own action.</summary>
     public bool Instant;
+    /// <summary>Came in through an AI's MCP endpoint (not the debug API): <see cref="RunControl"/> pauses and refuses these.</summary>
+    public bool FromAgent;
+    public DateTime Queued = DateTime.UtcNow;
     public TaskCompletionSource<(bool ok, string text)> Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
 }
 
@@ -76,7 +79,9 @@ public class AgentRuntime
     /// </summary>
     public Task<(bool ok, string text)> Enqueue(ToolDef tool, JsonElement args, bool observation = false)
     {
-        var call = new PendingCall { Tool = tool, Args = args, Instant = tool.Instant || tool.InstantFor?.Invoke(args) == true };
+        if (observation && RunControl.StopNow)
+            return Task.FromResult<(bool ok, string text)>((false, RunControl.StopMessage));
+        var call = new PendingCall { Tool = tool, Args = args, Instant = tool.Instant || tool.InstantFor?.Invoke(args) == true, FromAgent = observation };
         (observation && call.Instant ? _observations : _actions).Enqueue(call);
         return call.Done.Task;
     }
@@ -160,7 +165,7 @@ public class AgentRuntime
 
         public void Tick(ConcurrentQueue<PendingCall> queue)
         {
-            if (Current == null && queue.TryDequeue(out var next))
+            if (Current == null && !RunControl.ShouldHold(queue) && queue.TryDequeue(out var next))
                 Start(next);
             if (Current != null)
                 Step();

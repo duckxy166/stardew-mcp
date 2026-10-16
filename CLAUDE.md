@@ -110,6 +110,7 @@ mod/StardewMCP/
     WorldClock.cs      Freezes the world while any connected AI thinks (host pause); thinking timeout
     SplitScreen.cs     Joins P2-P4 without gamepads, per-screen zoom, gamepad-hint cleanup
     SplitScreenPatches.cs  Harmony: P1 input lock, clean frozen frames, hidden join lines, frame capture
+    RunControl.cs      Pause / stop_after_day / stop_now (F8, POST /api/control), unknown-menu watch for go_to_bed
 studio/
   overlay.html         OBS browser-source overlay
   replay.html          Day-by-day replay of the logs
@@ -118,6 +119,10 @@ studio/
 runner/
   smoke.py             LLM-free tool tests on a smoke_* copy of the save (gate for run_days.py)
   run_days.py          One `claude -p` session per in-game day
+  run_control.py       Pause / stop flags for run_days.py (graceful Ctrl+C); CLI: run_control.py pause|resume|stop_after_day|stop_now
+  save_backup.py       Backs up the save named by /api/state saveFolder (never smoke_*), keeps the last N
+  restore_day.py       Rolls the farm back to the end of a day (for mod bugs), sets later files aside in abandoned/
+  tests/               pytest for the runner scripts (no game needed)
   obs_recorder.py      Pauses OBS recording while the game is frozen
   system_prompt.md     System prompt used by run_days.py
 ```

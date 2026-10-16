@@ -814,6 +814,56 @@ def send_money():
         call("close_menu")
 
 
+@case("run_control")
+def run_control():
+    """POST /api/control: pause holds a new call until resume; stop_now refuses calls until resume (#32)."""
+    import threading
+
+    def control(action: str) -> dict:
+        return _request("/api/control", {"action": action}, timeout=10)
+
+    reset("Farm")
+    try:
+        control("clear_stop")
+        control("pause")
+        held: dict = {}
+
+        def call_status():
+            try:
+                held["text"] = ok("status")
+            except Exception as e:  # Smoke or network: report it from the case's thread
+                held["error"] = e
+
+        t = threading.Thread(target=call_status, daemon=True)
+        t.start()
+        time.sleep(1.5)
+        if not t.is_alive():
+            raise Smoke(f"a new call was answered while paused: {held}")
+        s = fresh_state()
+        if not (s.get("paused") and s.get("frozen")):
+            raise Smoke(f"paused but /api/state says paused={s.get('paused')} frozen={s.get('frozen')}")
+        control("resume")
+        t.join(15)
+        if t.is_alive() or "error" in held:
+            raise Smoke(f"the held call did not complete after resume: {held}")
+
+        control("stop_now")
+        good, text = call("status")
+        if good or "stopped" not in text:
+            raise Smoke(f"stop_now should refuse new calls, got ok={good}: {text.splitlines()[0]}")
+        control("resume")
+        ok("status")  # resume lifts the stop_now hold too
+        control("stop_after_day")
+        if not _request("/api/control", timeout=10).get("stopAfterDay"):
+            raise Smoke("stop_after_day was not recorded")
+    finally:
+        for action in ("resume", "clear_stop"):
+            try:
+                control(action)
+            except Exception:
+                pass
+
+
 CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
 
 

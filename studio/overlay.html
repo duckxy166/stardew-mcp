@@ -32,6 +32,10 @@
   #status .line2 { display: flex; align-items: center; gap: 10px; font-size: 18px; line-height: 1.4; color: var(--text-2); }
   #status .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
 
+  /* run control: shown while the operator has paused or stopped the run (state.paused / state.stopNow) */
+  #pauseBadge { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); padding: 10px 30px; border-radius: 10px;
+                background: rgba(231,72,86,.94); color: #fff; font-size: 34px; font-weight: 600; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
+
   /* the game stacks HUD messages ("+1 Parsnip", "Inventory full") up from the bottom-left corner: keep that strip clear */
   #col { position: absolute; left: 24px; top: 134px; bottom: var(--hud-clear); width: 480px; display: flex; flex-direction: column; gap: 16px;
          font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Mitr", monospace; }
@@ -98,6 +102,7 @@
 </style>
 </head>
 <body>
+  <div id="pauseBadge" class="hide">หยุดชั่วคราว</div>
   <div id="status" class="panel">
     <div class="line1">
       <span>วันที่ <span id="day">–</span><span class="muted">/100</span></span>
@@ -378,7 +383,11 @@ async function poll() {
     }
 
     let mode, color;
+    const held = !!(s.paused || s.stopNow);
+    $("pauseBadge").textContent = s.stopNow ? "หยุดการรัน" : "หยุดชั่วคราว";
+    $("pauseBadge").classList.toggle("hide", !held);
     if (!s.ready) { mode = "รอเกม…"; color = C.dim; }
+    else if (held) { mode = s.action ? `${s.stopNow ? "หยุดการรัน" : "หยุดชั่วคราว"} · รอให้${TOOL[s.action] || s.action}จบ` : (s.stopNow ? "หยุดการรัน" : "หยุดชั่วคราว"); color = C.bad; }
     else if (s.action) { mode = `เวลาเดิน · กำลัง${TOOL[s.action] || s.action}…`; color = C.act; }
     else if (s.frozen) { mode = speaker ? `หยุดเวลา · คุยกับ ${speaker}` : `หยุดเวลา · ${who()} กำลังคิด`; color = C.think; }
     else { mode = "เวลาเดิน"; color = C.act; }

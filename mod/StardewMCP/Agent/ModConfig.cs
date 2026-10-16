@@ -44,4 +44,7 @@ public class ModConfig
 
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
+
+    /// <summary>Key (an XNA <c>Keys</c> name, e.g. "F8") that toggles pause / resume while the game window has focus. Empty = no hotkey.</summary>
+    public string PauseKey { get; set; } = "F8";
 }

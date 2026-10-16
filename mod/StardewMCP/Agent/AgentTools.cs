@@ -1152,8 +1152,10 @@ public static partial class AgentTools
         Rt.Log.Add("system", text: "Sleeping...");
 
         // Wait for the new day; click through end-of-day screens.
+        var menuWatch = new UnknownMenuWatch(); // an unexpected menu open for 10 s is closed (RunControl.cs)
         for (int t = 0; t < 60 * 60 * 5; t++)
         {
+            menuWatch.Tick(Rt);
             switch (Game1.activeClickableMenu)
             {
                 case ShippingMenu sm when t % 60 == 0:

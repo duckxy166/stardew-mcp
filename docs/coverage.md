@@ -68,7 +68,7 @@ Rules:
 | Chests, fridge | action → `ItemGrabMenu` | `interact`, then `menu take/put` | ✅ chests (smoke `chest`); 🟡 fridge untested (needs the kitchen) | #3 |
 | Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ | |
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
-| Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
+| Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats; an unknown menu open for 10 s is closed (#32) | #38 |
 | Pass out (2:00, no energy) | automatic | | 🟡 | #22 |
 | TV: weather, luck, recipes | action on the TV → question | `interact` + `respond` | 🟡 untested | #14 |
 | Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
@@ -150,6 +150,7 @@ What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselv
 | `PendingProposalDialog` | not handled | the AI accepts or declines |
 | `ReadyCheckDialog` | not handled | AI seats wait; P4 accepts automatically |
 | Any other menu | "Menu open: X"; `menu` lists its labelled buttons (`click`, `ok`, `cancel`) | keep |
+| Unknown menu during `go_to_bed`'s wait for the new day (not `ShippingMenu`, `LevelUpMenu`, `SaveGameMenu`, `ReadyCheckDialog`) | waited 5 min, then the call failed | after 10 s: log its type, `exitThisMenu` (#32) |
 
 ## Build order
 

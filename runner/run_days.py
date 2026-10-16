@@ -12,6 +12,10 @@ Each day:
   * continues the same day in a new session if Haiku stopped before sleeping,
   * backs up the save folder after the day ends.
 
+Run control (pause, stop after the day, stop now; Ctrl+C is graceful) is in runner/run_control.py.
+The save backup (the loaded save only, last N kept) is in runner/save_backup.py and
+runner/restore_day.py rolls a day back.
+
 Before the first day it runs runner/smoke.py (LLM-free tool checks on a copy of the save) and stops if
 any case fails. That needs "EnableDebugApi": true in the mod's config.json; pass --skip-smoke to skip.
 """
@@ -30,6 +34,10 @@ from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import save_backup  # noqa: E402
+from run_control import RunControl  # noqa: E402
+
 API = "http://localhost:8770"
 DEFAULT_OUT = HERE.parent / "runs"
 DEFAULT_GOAL = (
@@ -48,6 +56,9 @@ def api_post(path: str, body: dict):
                                  headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=10) as r:
         return json.loads(r.read().decode("utf-8"))
+
+
+CTL = RunControl(api_get, api_post)
 
 
 def game_state() -> dict:
@@ -94,15 +105,12 @@ def last_actions(log_dir: Path, day: int, n: int = 25) -> str:
 
 
 def save_folder() -> Path | None:
-    saves = Path(os.environ["APPDATA"]) / "StardewValley" / "Saves"
+    """The folder of the save the game has loaded (/api/state saveFolder). Never a smoke_* slot, never a guess."""
     try:
-        info = api_get("/api/state")
-    except Exception:
-        info = {}
-    cands = [p for p in saves.iterdir() if p.is_dir()]
-    if not cands:
+        return save_backup.pick_save_folder(game_state(), save_backup.default_saves_dir())
+    except save_backup.BackupError as e:
+        print(f"  WARNING: save NOT backed up: {e}")
         return None
-    return max(cands, key=lambda p: p.stat().st_mtime)  # the save just written
 
 
 def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, part: int) -> int:
@@ -135,7 +143,8 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
     tool_calls = 0
     with transcript.open("w", encoding="utf-8") as tf:
         proc = subprocess.Popen(cmd, cwd=workdir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, encoding="utf-8", errors="replace", shell=False)
+                                text=True, encoding="utf-8", errors="replace", shell=False, **CTL.popen_kwargs())
+        CTL.watch(proc)  # stop_now / Ctrl+C: ends the session once the running tool call has finished
         assert proc.stdout
         for line in proc.stdout:
             tf.write(line)
@@ -171,14 +180,15 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
     return tool_calls
 
 
-def backup_save(out_dir: Path, day: int):
+def backup_save(out_dir: Path, day: int, keep: int = save_backup.DEFAULT_KEEP):
     src = save_folder()
     if not src:
         return
-    dst = out_dir / "saves" / f"day_{day:03}_{src.name}"
-    if dst.exists():
-        shutil.rmtree(dst)
-    shutil.copytree(src, dst)
+    try:
+        dst = save_backup.backup_folder(src, out_dir, day, keep)
+    except save_backup.BackupError as e:
+        print(f"  WARNING: save NOT backed up: {e}")
+        return
     print(f"  save backed up → {dst}")
 
 
@@ -192,6 +202,8 @@ def main():
     ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--skip-smoke", action="store_true", help="Do not run runner/smoke.py before the batch")
+    ap.add_argument("--keep-backups", type=int, default=save_backup.DEFAULT_KEEP,
+                    help="Keep the newest N save backups (default %(default)s, 0 = keep all)")
     args = ap.parse_args()
 
     out_dir = Path(args.out)
@@ -205,8 +217,13 @@ def main():
         if subprocess.run([sys.executable, str(HERE / "smoke.py")]).returncode != 0:
             raise SystemExit("Smoke tests failed, not starting the batch. Fix the failing case above, or pass --skip-smoke.")
 
+    CTL.start()  # clears stale stop requests; Ctrl+C = stop after the day / after the call / abort
     days_played = 0
     while True:
+        if CTL.stop_between_days():
+            print(f"Stopped as requested after {days_played} day(s). Run again to continue.")
+            break
+        CTL.wait_while_paused()
         state = wait_ready()
         day = state["day"]
         if args.until_day and day > args.until_day:
@@ -223,6 +240,14 @@ def main():
                 prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
                           f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")
             run_session(args, out_dir, day, prompt, system_prompt, part)
+            if CTL.stop_now_requested():
+                if game_state().get("day", day) > day:  # the last call was go_to_bed and the day did finish
+                    backup_save(out_dir, day, args.keep_backups)
+                    print(f"stop_now: day {day} had finished.")
+                else:
+                    print(f"stop_now: the session ended after its last tool call; day {day} is not finished.")
+                print("The game stays frozen until you resume (F8 or run_control.py resume). Run again to continue.")
+                return
             time.sleep(3)
             s = wait_ready()
             if s["day"] > day:
@@ -231,7 +256,7 @@ def main():
 
         s = wait_ready()
         if s["day"] > day:
-            backup_save(out_dir, day)
+            backup_save(out_dir, day, args.keep_backups)
             days_played += 1
         else:
             print(f"Day {day} still not finished after {args.max_parts} sessions — stopping for a human to check.")
