@@ -107,6 +107,12 @@ The whole world (clock, farmers, NPCs) is frozen while any connected AI is think
 never loses game time. `/api/state` lists every seat with its current action and thinking time.
 The first time the game starts its local co-op server, Windows Firewall may ask once; allow it.
 
+AI players notice each other. `look` and `status` list the other players in view with what each is *actually*
+doing (running tool, its reason, game minutes so far) next to what it last said and wrote on the plan board.
+An @name or @pN in `say`, a whisper, a gift, a player coming into view or entering your house, a theft from
+your chest or plot, rain starting, or crows on the farm are added to your next tool result as `Events:` and
+stop a running `wait`, `walk_to`, `travel_to` or farm action, so a model never sleeps through them.
+
 The filming save needs separate wallets and 3 cabins; the mod checks this at startup and logs a warning when it
 is not so. How to create the save, who owns what (`claim`, `theft` events) and the sleep rule are in
 [docs/filming-save.md](docs/filming-save.md).

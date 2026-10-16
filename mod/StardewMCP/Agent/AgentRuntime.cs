@@ -59,6 +59,14 @@ public class AgentRuntime
     /// <summary>True while an action that lets game time pass is running.</summary>
     public bool ActionRunning => _actionLane.Current is { Instant: false };
     public string? CurrentTool => _actionLane.Current?.Tool.Name;
+    /// <summary>The call in the action lane (check <see cref="PendingCall.Instant"/>), or null. <see cref="Perception"/> reads it.</summary>
+    public PendingCall? CurrentCall => _actionLane.Current;
+
+    /// <summary>
+    /// Stop the running action now and give <paramref name="result"/> to the AI as its result (not a failure).
+    /// False when no non-instant action is running. Used by <see cref="Perception"/>; any other event source can use it too.
+    /// </summary>
+    public bool Interrupt(string result) => _actionLane.Interrupt(result);
 
     public AgentRuntime(IModHelper helper, IMonitor monitor, ModConfig config, PlayerLog log)
     {
@@ -87,6 +95,7 @@ public class AgentRuntime
         _globalTicks++;
         AutoHandleOverlays();
         SocialTools.Tick(Log.Player);
+        Perception.Tick(this);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);
     }
@@ -246,6 +255,21 @@ public class AgentRuntime
             Finish();
         }
 
+        /// <summary>Drop the running action where it stands. Disposing the coroutines runs their finally blocks (e.g. a harvest still reports its thefts).</summary>
+        public bool Interrupt(string result)
+        {
+            if (Current == null || Current.Instant) return false;
+            while (_stack.Count > 0)
+            {
+                try { (_stack.Pop() as IDisposable)?.Dispose(); }
+                catch (Exception ex) { _rt._monitor.Log($"Tool {Current.Tool.Name} failed while being interrupted: {ex.Message}", LogLevel.Warn); }
+            }
+            _ctx!.Ok = true;
+            _ctx.Result = result;
+            Finish();
+            return true;
+        }
+
         private void Finish()
         {
             var call = Current!;
@@ -255,7 +279,7 @@ public class AgentRuntime
             _ctx = null;
 
             var text = ctx.Result;
-            var mail = call.Tool.Mail ? SocialTools.TakeMail(_rt.Log.Player) : "";
+            var mail = call.Tool.Mail ? Perception.TakeMail(_rt.Log.Player) : "";
             if (mail.Length > 0) text = text.TrimEnd() + "\n" + mail;
             if (call.Tool.AppendStatus && Context.IsWorldReady)
                 text = text.TrimEnd() + "\n" + AgentTools.Footer();

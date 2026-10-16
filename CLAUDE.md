@@ -105,6 +105,7 @@ mod/StardewMCP/
     EconomyTools.cs    claim / unclaim / pay (a macro over Lewis's ledger book) (part of AgentTools)
     Ownership.cs       Who owns which chest, machine and plot; `theft` log entry + C# event when another seat takes from it
     FarmRules.cs       Startup check of the save (co-op, separate wallets, 3 cabins) and the bedtime reminder
+    Perception.cs      Players in view with what they actually do vs. what they claimed; per-seat events (mention, whisper, gift, theft, arrival, weather) that interrupt a running action
     WorldText.cs       Text renderings of status / surroundings / inventory for the model
     AgentLog.cs        Per-day JSONL logs and diaries
     ModConfig.cs       config.json settings

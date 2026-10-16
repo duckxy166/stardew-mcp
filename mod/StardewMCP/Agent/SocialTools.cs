@@ -41,6 +41,13 @@ public static class PlanBoard
         }
     }
 
+    /// <summary>The newest section written by <paramref name="author"/> ("Name (pN)"), or null: what that player has put on record as its plan.</summary>
+    public static PlanEdit? LatestBy(string author)
+    {
+        lock (Lock)
+            return Sections.Values.Where(e => e.Author == author).OrderByDescending(e => e.Id).FirstOrDefault();
+    }
+
     public static object Snapshot()
     {
         lock (Lock)
@@ -70,7 +77,8 @@ public static class PlanBoard
 /// <summary>
 /// Social tools: say, whisper, emote, give and the shared plan board. Kept apart from
 /// <see cref="AgentTools"/>. Chat and whispers land in the target's inbox and ride on that
-/// seat's next tool result (see <see cref="TakeMail"/>); nothing here interrupts a running action.
+/// seat's next tool result (see <see cref="TakeMail"/>). An @mention, a whisper or a gift also raises a <see cref="Perception"/>
+/// event, which can stop the target's running walk, wait or farm action.
 /// </summary>
 public static class SocialTools
 {
@@ -104,14 +112,15 @@ public static class SocialTools
         new()
         {
             Name = "say",
-            Description = "Say something out loud: it appears in the in-game chat box and above your head. Every player hears it, at any distance, and so do the viewers. Keep it short.",
+            Description = "Say something out loud: it appears in the in-game chat box and above your head. Every player hears it, at any distance, and so do the viewers. Keep it short. " +
+                          "Write @name or @p2 to call a player: it stops what they are doing (walking, waiting, farming) so they read it at once.",
             Schema = AgentTools.Obj(new { text = AgentTools.Str("What you say") }, "text"),
             Instant = true, AppendStatus = false, Run = Say
         },
         new()
         {
             Name = "whisper",
-            Description = "Tell one player something privately. Nobody else in the game learns it happened; viewers do see it.",
+            Description = "Tell one player something privately. Nobody else in the game learns it happened; viewers do see it. It stops what that player is doing (walking, waiting, farming) so they read it at once.",
             Schema = AgentTools.Obj(new { to = AgentTools.Str("Player id (p1, p2...) or name"), text = AgentTools.Str("What you whisper") }, "to", "text"),
             Instant = true, AppendStatus = false, Run = Whisper
         },
@@ -212,6 +221,7 @@ public static class SocialTools
                 Game1.createItemDebris(g.item, me.getStandingPosition(), me.FacingDirection);
                 Deliver(Players.ById(player)!, $"{g.from} gave you {label}, but your inventory was full: it fell at your feet.");
             }
+            Perception.Notify(Players.ById(player)!, "gift", $"{g.from} gave you {label}");
         }
     }
 
@@ -230,6 +240,7 @@ public static class SocialTools
         var from = Label(Players.ById(Me)!);
         var heard = OtherAis().ToList();
         foreach (var s in heard) Deliver(s, $"[{WorldText.FormatTime(Game1.timeOfDay)}] {from}: {text}");
+        Perception.OnSay(Players.ById(Me)!, text, heard);
         AgentTools.Rt.Log.Add("say", text: text);
         c.Result = $"You said: \"{text}\" ({heard.Count} other player{(heard.Count == 1 ? "" : "s")} heard it).";
     }
@@ -242,6 +253,7 @@ public static class SocialTools
         if (to == null) yield break;
 
         Deliver(to, $"[{WorldText.FormatTime(Game1.timeOfDay)}] {Label(Players.ById(Me)!)} whispers: {text}");
+        Perception.Notify(to, "whisper", $"{Label(Players.ById(Me)!)} whispered to you");
         AgentTools.Rt.Log.Add("whisper", text: text, args: new { to = to.Id });
         c.Result = $"You whispered to {Label(to)}: \"{text}\". Only they will see it.";
     }

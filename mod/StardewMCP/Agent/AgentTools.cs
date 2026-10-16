@@ -632,27 +632,34 @@ public static partial class AgentTools
         var loc = Loc;
         var lines = new List<string>();
         var taken = new Dictionary<string, (Point tile, List<string> crops)>(); // owner -> ripe crops harvested from their ground
-        foreach (var t in tiles)
+        try
         {
-            if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu opened (inventory full?)."); break; }
-            var sub = new CallContext();
-            yield return WalkAdjacent(t, sub);
-            if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
-            var label = WorldText.Describe(loc, t.X, t.Y).label;
-            var ripe = Ownership.RipeCrop(loc, t.X, t.Y);
-            var owner = ripe != null ? Ownership.OwnerOf(loc, t.X, t.Y) : null;
-            loc.checkAction(new xTile.Dimensions.Location(t.X, t.Y), Game1.viewport, P);
-            yield return Ticks(20);
-            yield return WaitIdle(120);
-            lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {WorldText.Describe(loc, t.X, t.Y).label ?? "empty"}");
-            if (ripe != null && owner != null && owner != Rt.Log.Player && Ownership.RipeCrop(loc, t.X, t.Y) == null)
+            foreach (var t in tiles)
             {
-                if (!taken.TryGetValue(owner, out var theft)) taken[owner] = theft = (t, new List<string>());
-                theft.crops.Add(ripe);
+                if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu opened (inventory full?)."); break; }
+                var sub = new CallContext();
+                yield return WalkAdjacent(t, sub);
+                if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
+                var label = WorldText.Describe(loc, t.X, t.Y).label;
+                var ripe = Ownership.RipeCrop(loc, t.X, t.Y);
+                var owner = ripe != null ? Ownership.OwnerOf(loc, t.X, t.Y) : null;
+                loc.checkAction(new xTile.Dimensions.Location(t.X, t.Y), Game1.viewport, P);
+                yield return Ticks(20);
+                yield return WaitIdle(120);
+                lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {WorldText.Describe(loc, t.X, t.Y).label ?? "empty"}");
+                if (ripe != null && owner != null && owner != Rt.Log.Player && Ownership.RipeCrop(loc, t.X, t.Y) == null)
+                {
+                    if (!taken.TryGetValue(owner, out var theft)) taken[owner] = theft = (t, new List<string>());
+                    theft.crops.Add(ripe);
+                }
             }
         }
-        foreach (var (victim, theft) in taken)
-            Ownership.ReportTheft(Rt.Log.Player, victim, string.Join(", ", theft.crops.GroupBy(n => n).Select(g => $"{g.Count()} x {g.Key}")), "crops", loc, theft.tile);
+        finally
+        {
+            // Also runs when the harvest is interrupted (see Perception), so crops already taken are still reported as theft.
+            foreach (var (victim, theft) in taken)
+                Ownership.ReportTheft(Rt.Log.Player, victim, string.Join(", ", theft.crops.GroupBy(n => n).Select(g => $"{g.Count()} x {g.Key}")), "crops", loc, theft.tile);
+        }
         yield return Ticks(30);
         var diff = Diff(before);
         c.Result = string.Join("\n", lines) + "\n" + (diff.Length > 0 ? diff : "Nothing was collected.");
