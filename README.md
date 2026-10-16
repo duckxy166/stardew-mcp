@@ -119,6 +119,47 @@ The first time the game starts its local co-op server, Windows Firewall may ask 
   endpoints are not MCP tools, so the AI cannot see or call them.
 - `obs_recorder.py` pauses the OBS recording while the game is frozen, so the video only contains
   gameplay. Needs OBS with obs-websocket enabled.
+- `game_watchdog.py` is used by `run_days.py` to survive a game crash or hang (below).
+
+### Watchdog: crash and hang recovery
+
+Stardew only saves overnight, so after a crash the only way on is to start the game again and replay
+the day from the morning. `run_days.py` watches the game while it plays and does that by itself:
+
+| Signal | Meaning |
+|---|---|
+| process gone | the SMAPI process is not running (two checks in a row) |
+| no answer | `/api/state` fails for more than 2 minutes, or its `heartbeat` stops counting for that long (the game loop is blocked while the HTTP thread still answers) |
+| stalled | an action is running (`frozen: false`) but the game clock has not moved for 3 minutes. Thinking time never counts; cutscenes, festivals and the overnight menus get 15 minutes |
+
+On a fault it kills the `claude` session and the game, moves the attempt's files aside, starts the game
+again, waits until the save is loaded and plays the day again with a fresh part-1 session. The AI is not
+told. After 2 replays of the same day the third crash stops the batch with a message (probably a mod bug).
+
+```
+py runner/run_days.py --days 3 --game-cmd "C:\Program Files (x86)\Steam\steamapps\common\Stardew Valley\StardewModdingAPI.exe"
+```
+
+- `--game-cmd` (or env `STARDEW_GAME_CMD`) is the command that starts SMAPI; the working directory is its folder.
+  Without it faults are still detected but the batch stops with a message instead of relaunching.
+  `--no-watchdog` turns everything off.
+- `--game-process` (default `StardewModdingAPI.exe` on Windows, `StardewModdingAPI` elsewhere) is the name used to
+  find and kill the game. Windows uses `tasklist` / `taskkill /F /T`, other systems `pgrep` / `pkill`.
+- **`AutoLoadSave`**: the mod reads `config.json` once at start, so before every relaunch the runner writes the run's
+  save folder name into `AutoLoadSave` (all other keys stay as they are, the file is replaced atomically) and puts the
+  old value back when the runner ends. The save is the one loaded when the batch starts (`/api/state.saveFolder`), or
+  `--save-folder`. `--mod-config` names the file if it is not `Mods/StardewMCP/config.json` next to `--game-cmd`.
+  The mod stays on the title screen and logs an error if that folder does not exist in the game's `Saves` folder.
+- Other flags: `--crash-retries` (2), `--no-answer-secs` (120), `--stall-secs` (180), `--launch-timeout` (600).
+- Files of a crashed attempt are kept: `day_005.jsonl` becomes `day_005_attempt1.jsonl`,
+  `claude_day_005_part1.jsonl` becomes `claude_day_005_attempt1_part1.jsonl`, and the day's diaries/journals become
+  `diary_005_attempt1.md`, so nothing a crashed attempt wrote reaches the AI's memory. `watchdog.jsonl` in the log
+  folder lists every fault, relaunch and moved file. If the game crashed after the night save, the relaunched game is
+  already on the next day: the day counts as done and its files are put back.
+- Check the setup without any AI: `py runner/game_watchdog.py --relaunch-test --game-cmd "..."` kills the game, starts
+  it again and checks that the save auto-loads.
+- With `"EnableDebugApi": true`, `POST /api/debug/hang` with `{"seconds": 300}` blocks the whole game loop, to see the
+  "no answer" signal fire for real. `/api/state` also carries `heartbeat`, `eventUp` and `festival` for the watchdog.
 
 `studio/` contains the YouTube / OBS layer (`overlay.html`, `replay.html`, and `director.py` which switches OBS scenes from `/api/events`).
 

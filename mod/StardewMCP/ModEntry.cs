@@ -97,6 +97,12 @@ public class ModEntry : Mod
             return;
 
         _autoLoadDone = true;
+        // A wrong name would otherwise end in a failed load and a stuck title screen (runner/game_watchdog.py then waits in vain).
+        if (!Directory.Exists(Path.Combine(Constants.SavesPath, _config.AutoLoadSave)))
+        {
+            Monitor.Log($"AutoLoadSave \"{_config.AutoLoadSave}\" is not a folder in {Constants.SavesPath}; staying on the title screen.", LogLevel.Error);
+            return;
+        }
         SaveFolder.Pending = _config.AutoLoadSave;
         Monitor.Log($"Auto-loading save {_config.AutoLoadSave}", LogLevel.Info);
         SaveGame.Load(_config.AutoLoadSave);

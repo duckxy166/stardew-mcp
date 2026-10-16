@@ -10,7 +10,9 @@ Each day:
   * runs `claude -p` with only the in-game MCP server (http://localhost:8770/mcp),
   * saves Claude's full stream-json transcript next to the game logs (proof of a real run),
   * continues the same day in a new session if Haiku stopped before sleeping,
-  * backs up the save folder after the day ends.
+  * backs up the save folder after the day ends,
+  * watches the game (runner/game_watchdog.py): if it crashes or hangs, relaunches it, auto-loads the save
+    and replays the day from the morning (see --game-cmd; --no-watchdog turns this off).
 
 Before the first day it runs runner/smoke.py (LLM-free tool checks on a copy of the save) and stops if
 any case fails. That needs "EnableDebugApi": true in the mod's config.json; pass --skip-smoke to skip.
@@ -29,9 +31,12 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import game_watchdog
+
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
 DEFAULT_OUT = HERE.parent / "runs"
+GUARD = game_watchdog.NullWatchdog()  # replaced in main() unless --no-watchdog
 DEFAULT_GOAL = (
     "Build the best farm you can in 100 days. You choose the strategy: what to grow, how to earn money, "
     "which villagers to befriend and what to upgrade."
@@ -63,7 +68,10 @@ def wait_ready(timeout: int = 600) -> dict:
         s = game_state()
         if s.get("ready"):
             return s
+        GUARD.check()
         time.sleep(3)
+    if GUARD.armed:
+        raise game_watchdog.GameFault("not_ready", f"the world was not ready for {timeout}s")
     raise SystemExit("Game is not ready (start Stardew via SMAPI and load the save).")
 
 
@@ -137,6 +145,7 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
         proc = subprocess.Popen(cmd, cwd=workdir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 text=True, encoding="utf-8", errors="replace", shell=False)
         assert proc.stdout
+        GUARD.attach(proc)
         for line in proc.stdout:
             tf.write(line)
             tf.flush()
@@ -166,8 +175,10 @@ def run_session(args, out_dir: Path, day: int, prompt: str, system_prompt: str, 
             elif ev.get("type") == "result":
                 print(f"  result: {ev.get('subtype')} turns={ev.get('num_turns')} cost=${ev.get('total_cost_usd', 0):.3f}")
                 if ev.get("is_error") and tool_calls == 0:
+                    GUARD.explain_failure()  # a dead game makes Claude fail at once: recover instead of stopping
                     raise SystemExit(f"Claude error, stopping: {ev.get('result')}")
         proc.wait()
+        GUARD.detach()
     return tool_calls
 
 
@@ -192,12 +203,15 @@ def main():
     ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--skip-smoke", action="store_true", help="Do not run runner/smoke.py before the batch")
+    game_watchdog.add_args(ap)
     args = ap.parse_args()
 
     out_dir = Path(args.out)
     log_dir = out_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     template = (HERE / "system_prompt.md").read_text(encoding="utf-8")
+    global GUARD
+    GUARD = game_watchdog.from_args(args, log_dir, api_get, API)
 
     if not args.skip_smoke:
         wait_ready()
@@ -207,7 +221,7 @@ def main():
 
     days_played = 0
     while True:
-        state = wait_ready()
+        state = GUARD.ready(wait_ready)
         day = state["day"]
         if args.until_day and day > args.until_day:
             break
@@ -215,21 +229,26 @@ def main():
             break
 
         system_prompt = template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
-        for part in range(1, args.max_parts + 1):
-            if part == 1:
-                prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
-                          "จากนั้นเล่นทั้งวันจนเข้านอนด้วย go_to_bed")
-            else:
-                prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
-                          f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")
-            run_session(args, out_dir, day, prompt, system_prompt, part)
-            time.sleep(3)
-            s = wait_ready()
-            if s["day"] > day:
-                break
-            print(f"  day {day} not finished after part {part}; continuing")
 
-        s = wait_ready()
+        def play_day(attempt: int) -> dict:
+            # After a crash the watchdog calls this again: the day restarts from the morning with a fresh part 1.
+            for part in range(1, args.max_parts + 1):
+                if part == 1:
+                    prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
+                              "จากนั้นเล่นทั้งวันจนเข้านอนด้วย go_to_bed")
+                else:
+                    prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
+                              f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")
+                run_session(args, out_dir, day, prompt, system_prompt, part)
+                GUARD.check()
+                time.sleep(3)
+                s = wait_ready()
+                if s["day"] > day:
+                    break
+                print(f"  day {day} not finished after part {part}; continuing")
+            return wait_ready()
+
+        s = GUARD.run_day(day, play_day)
         if s["day"] > day:
             backup_save(out_dir, day)
             days_played += 1

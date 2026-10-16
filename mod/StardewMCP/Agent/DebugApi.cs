@@ -20,6 +20,7 @@ public static class DebugApi
     private static string? _pendingLoad;
     private static bool _exiting;
     private static int _titleTicks;
+    private static int _hangSeconds;
 
     private static string S(JsonElement a, string name, string def = "") =>
         a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? def : def;
@@ -53,6 +54,7 @@ public static class DebugApi
             Op("capture", Capture, needsWorld: false),
             Op("chat_log", ChatLog),
             Op("disconnect", Disconnect),
+            Op("hang", Hang, needsWorld: false),
         }.ToDictionary(t => t.Name);
     }
 
@@ -261,6 +263,18 @@ public static class DebugApi
         yield break;
     }
 
+    /// <summary>
+    /// Test hook for runner/game_watchdog.py: block the whole game loop (every screen) for N seconds, starting on the
+    /// next host tick so this call still answers. The HTTP server keeps running, like in a real hang, so /api/state
+    /// answers with a stale snapshot whose "heartbeat" stops counting.
+    /// </summary>
+    private static IEnumerator Hang(JsonElement a, CallContext c)
+    {
+        _hangSeconds = Math.Clamp(I(a, "seconds", 300), 1, 1800);
+        c.Result = $"Blocking the game loop for {_hangSeconds}s from the next tick";
+        yield break;
+    }
+
     /// <summary>What this screen's chat box shows, one line per message (to prove a line reached this player's screen).</summary>
     private static IEnumerator ChatLog(JsonElement a, CallContext c)
     {
@@ -288,6 +302,13 @@ public static class DebugApi
     /// <summary>Called every tick from ModEntry: leave the current save, then load the requested one from the title screen.</summary>
     public static void Tick()
     {
+        if (_hangSeconds > 0)
+        {
+            int seconds = _hangSeconds;
+            _hangSeconds = 0;
+            System.Threading.Thread.Sleep(TimeSpan.FromSeconds(seconds));
+        }
+
         if (_pendingLoad == null) return;
 
         if (Context.IsWorldReady)
