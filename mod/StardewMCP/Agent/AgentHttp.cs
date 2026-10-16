@@ -199,7 +199,7 @@ public class AgentHttp
     private async Task HandleSpikePlayer(HttpListenerRequest req, HttpListenerResponse res, int screen, string name)
     {
         var rt = screen >= 0 && screen < 4 ? SplitScreenSpike.Runtimes[screen] : null;
-        ToolDef? tool = name == "spike_dialogue" ? SplitScreenSpike.DialogueOp : null;
+        ToolDef? tool = name == "spike_dialogue" ? SplitScreenSpike.DialogueOp : name == "spike_zoom" ? SplitScreenSpike.ZoomOp : null;
         if (rt == null || !(tool != null || _tools.TryGetValue(name, out tool) || _debug.TryGetValue(name, out tool)))
         {
             res.StatusCode = 404;

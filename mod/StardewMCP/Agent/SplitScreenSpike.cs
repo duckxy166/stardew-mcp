@@ -63,6 +63,12 @@ public static class SplitScreenSpike
         if (s == 0)
         {
             _updates++;
+            // A joining farmhand instance gets fresh Options again when it enters loadingMode, and SMAPI raises
+            // no UpdateTicked for it while loading; with the window unfocused its update is then skipped forever
+            // (Game1._update: !IsActive && pauseWhenOutOfFocus && multiplayerMode == 0). Fix it from the host.
+            foreach (var g in GameRunner.instance.gameInstances)
+                if (g.instanceOptions is { pauseWhenOutOfFocus: true } o)
+                    o.pauseWhenOutOfFocus = false;
             while (_control.TryDequeue(out var c))
             {
                 try { c.done.TrySetResult(c.run()); }
@@ -152,6 +158,31 @@ public static class SplitScreenSpike
         c.Result = $"menu on screen {Context.ScreenId}: {Game1.activeClickableMenu?.GetType().Name}";
     }
 
+    /// <summary>Per-screen op (POST /api/debug/p{N}/spike_zoom {zoom, ui}): set that screen's base zoom / UI scale.</summary>
+    public static readonly ToolDef ZoomOp = new()
+    {
+        Name = "spike_zoom", Description = "debug", Schema = new { }, Instant = true, AppendStatus = false,
+        Run = (a, c) => ZoomRun(a, c),
+    };
+
+    private static System.Collections.IEnumerator ZoomRun(JsonElement a, CallContext c)
+    {
+        float? F(string n) => a.ValueKind == JsonValueKind.Object && a.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetSingle() : null;
+        SplitScreenLayout.SetZoom(F("zoom"), F("ui"));
+        yield return null; // Game1.Update applies desired zoom/UI scale and rebuilds this screen's render targets
+        yield return null;
+        var g = Game1.game1;
+        c.Result = JsonSerializer.Serialize(new
+        {
+            screen = Context.ScreenId,
+            baseZoom = Game1.options.baseZoomLevel, effectiveZoom = Game1.options.zoomLevel,
+            baseUi = Game1.options.baseUIScale, effectiveUi = Game1.options.uiScale,
+            window = new[] { g.localMultiplayerWindow.X, g.localMultiplayerWindow.Y, g.localMultiplayerWindow.Width, g.localMultiplayerWindow.Height },
+            viewportTiles = new[] { Game1.viewport.Width / 64f, Game1.viewport.Height / 64f },
+            screenTarget = new[] { Game1.game1.screen?.Width ?? 0, Game1.game1.screen?.Height ?? 0 },
+        });
+    }
+
     // ------------------------------------------------------------------ joining
 
     private static readonly string[] Names = { "Claude", "Gemini", "GPT", "P4" };
@@ -234,6 +265,34 @@ public static class SplitScreenSpike
                 Game1.game1.Window_ClientSizeChanged(null, null);
                 return new { ok = true, backBuffer = new[] { Game1.graphics.PreferredBackBufferWidth, Game1.graphics.PreferredBackBufferHeight }, client = new[] { Game1.game1.Window.ClientBounds.Width, Game1.game1.Window.ClientBounds.Height } };
             }
+
+            case "layout":
+            {
+                if (a.ValueKind == JsonValueKind.Object)
+                {
+                    if (a.TryGetProperty("grid3", out var g3)) SplitScreenLayout.Grid3 = g3.GetBoolean();
+                    if (a.TryGetProperty("hidePaused", out var hp)) SplitScreenLayout.HidePausedBanner = hp.GetBoolean();
+                    if (a.TryGetProperty("hideJoin", out var hj)) SplitScreenLayout.HideJoinChat = hj.GetBoolean();
+                    if (a.TryGetProperty("hideCursor", out var hc)) SplitScreenLayout.HideCursor = hc.GetBoolean();
+                }
+                Game1.game1.Window_ClientSizeChanged(null, null);
+                return new { ok = true, SplitScreenLayout.Grid3, SplitScreenLayout.HidePausedBanner, SplitScreenLayout.HideJoinChat };
+            }
+
+            case "capture":
+            {
+                string path = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("path", out var p) ? p.GetString()! : Path.Combine(Path.GetTempPath(), "stardew-capture.png");
+                SplitScreenLayout.LastCapture = null;
+                SplitScreenLayout.PendingCapture = path;
+                return new { ok = true, pending = path };
+            }
+
+            case "capture_status":
+                return new { ok = true, last = SplitScreenLayout.LastCapture };
+
+            case "chat_clear":
+                GameRunner.instance.ExecuteForInstances(_ => Game1.chatBox?.messages.Clear());
+                return new { ok = true };
 
             case "nosleep":
                 // MonoGame sleeps 20 ms per frame while the window is unfocused (OBS/terminal in front).

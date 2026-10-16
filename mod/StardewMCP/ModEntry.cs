@@ -28,6 +28,8 @@ public class ModEntry : Mod
         _agent = new AgentRuntime(helper, Monitor, _config, new AgentLog(logDir, Monitor));
         AgentTools.Rt = _agent;
         SplitScreenSpike.Init(helper, Monitor, _config, logDir, _agent);
+        // Spike: set STARDEW_SPIKE_PATCHES=none|layout|all (default all) to A/B the Harmony patches.
+        SplitScreenLayout.Apply(ModManifest, Monitor, System.Environment.GetEnvironmentVariable("STARDEW_SPIKE_PATCHES") ?? "all");
         _http = new AgentHttp(_agent, Monitor, Path.Combine(helper.DirectoryPath, "assets"));
 
         helper.Events.GameLoop.GameLaunched += (_, _) => _http.Start(_config.HttpPort);
@@ -61,6 +63,7 @@ public class ModEntry : Mod
             DebugApi.Tick();
         }
         SplitScreenSpike.Tick(e.Ticks);
+        SplitScreenLayout.Tick();
         var rt = SplitScreenSpike.Runtimes[screen]!;
         AgentTools.Rt = rt;
         rt.Tick();
