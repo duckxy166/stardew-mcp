@@ -268,6 +268,36 @@ def parse_things(look_text: str, symbol: str) -> list[tuple[str, list[tuple[int,
     return out
 
 
+def parse_cookable(listing: str) -> dict[str, int]:
+    """Dishes a `cook()` listing says can be cooked now, with how many times: {'Fried Egg': 4}."""
+    return {m.group(1): int(m.group(3))
+            for m in re.finditer(r"^  (.+?)(?: \(makes (\d+)\))?: .*\[you can cook (\d+)\]$", listing, re.M)}
+
+
+def parse_journal(text: str) -> list[dict]:
+    """Journal entries of a `quests` result: [{'type': 'Help Wanted', 'name': 'Lumber', 'who': 'Pierre'}, ...]."""
+    out = []
+    for m in re.finditer(r"^  \d+\. \[(Help Wanted|Story)\] (.+?)(?: - (?:asked by|about) (.+))?$", text, re.M):
+        out.append({"type": m.group(1), "name": m.group(2), "who": m.group(3) or ""})
+    return out
+
+
+def parse_board(text: str) -> dict | None:
+    """Today's Help Wanted line of a `quests` result: {'name', 'giver', 'state': 'free'|'taken'|'mine', 'by'}, or None when nothing is posted."""
+    m = re.search(r"^Help Wanted board \(Town\), today: \[Help Wanted\] (.+?)(?: - asked by (.+?))? - "
+                  r"(YOU took it|TAKEN by (.+?)\.|still FREE)", text, re.M)
+    if not m:
+        return None
+    state = "mine" if m.group(3).startswith("YOU") else "taken" if m.group(3).startswith("TAKEN") else "free"
+    return {"name": m.group(1), "giver": m.group(2) or "", "state": state, "by": m.group(4) or ""}
+
+
+def parse_money_left(text: str) -> int | None:
+    """'1950g left.' at the end of a crack_geode result."""
+    m = re.search(r"(\d+)g left\.", text)
+    return int(m.group(1)) if m else None
+
+
 def inventory_count(name: str) -> int:
     """Total stack size of items called exactly `name` in the `inventory` tool output."""
     total = 0
@@ -665,6 +695,146 @@ def craft_place_chest():
     ok("chest", x=x, y=y, action="store", item="Parsnip", reason="smoke test")
     if inventory_count("Parsnip") != 0:
         raise Smoke("the crafted and placed chest did not take the Parsnips")
+
+
+@case("cook")
+def cook():
+    """cook() lists the cooking recipes; cook(recipe, quantity) makes dishes in the farmhouse kitchen (CraftingRecipe, cooking)."""
+    reset("Farm")
+    ok("travel_to", location="FarmHouse", reason="smoke test")
+    listing = ok("cook")
+    if "Cooking recipes you know" not in listing or "Cookable now:" not in listing:
+        raise Smoke(f"cook() does not list the cooking recipes:\n{listing[:400]}")
+    if call("cook", recipe="Not A Real Dish", reason="smoke test")[0]:
+        raise Smoke("cook accepted a recipe the player does not know")
+    if "Fried Egg" not in listing:
+        raise SkipCase("this player does not know Fried Egg")
+    debug("add_item", id="(O)176", qty=4)  # Egg
+    eggs, dishes = inventory_count("Egg"), inventory_count("Fried Egg")
+    good, text = call("cook", recipe="Fried Egg", quantity=2, reason="smoke test")
+    if not good and "no kitchen" in text:
+        raise SkipCase("the farmhouse has no kitchen yet (house upgrade 1)")
+    if not good or not text.startswith("Cooked 2x Fried Egg"):
+        raise Smoke(f"cook Fried Egg x2 failed: {text.splitlines()[0]}")
+    if inventory_count("Fried Egg") != dishes + 2 or inventory_count("Egg") != eggs - 2:
+        raise Smoke(f"expected +2 Fried Egg and -2 Egg: {text.splitlines()[0]}")
+    good, text = call("cook", recipe="Fried Egg", quantity=99, reason="smoke test")
+    if not good or "Stopped after" not in text:
+        raise Smoke(f"cooking 99 should cook what the eggs allow and stop on ingredients: {text.splitlines()[0]}")
+    ok("eat", item="Fried Egg", reason="smoke test")
+
+
+@case("quests")
+def quests():
+    """quests lists the journal and the Help Wanted board; share=true posts the journal to the plan board."""
+    reset("Farm")
+    text = ok("quests")
+    if "Your journal (" not in text or "Help Wanted board (Town)" not in text:
+        raise Smoke(f"quests does not show the journal and the board:\n{text[:500]}")
+    section = None
+    try:
+        text = ok("quests", share=True)
+        m = re.search(r'Posted to the plan board, section "(.+?)"', text)
+        if not m:
+            raise Smoke(f"share=true did not post to the plan board:\n{text[-300:]}")
+        section = m.group(1)
+        if section not in ok("plan_read"):
+            raise Smoke(f"plan_read does not show the section {section!r}")
+    finally:
+        if section:
+            call("plan_edit", section=section, text="")
+
+
+@case("accept_quest")
+def accept_quest():
+    """accept_quest walks to the Town board and presses Accept; the request then shows in the journal as taken by you."""
+    reset("Farm")
+    board = parse_board(ok("quests"))
+    if board is None:
+        raise SkipCase("no Help Wanted request is posted today")
+    if board["state"] != "free":
+        raise SkipCase(f"today's request is already {board['state']} ({board['by'] or 'you'})")
+    text = ok("accept_quest", reason="smoke test")
+    if not text.startswith("Accepted"):
+        raise Smoke(f"accept_quest did not accept: {text.splitlines()[0]}")
+    after = ok("quests")
+    if not any(e["type"] == "Help Wanted" and e["name"] == board["name"] for e in parse_journal(after)):
+        raise Smoke(f"the journal does not list {board['name']!r} after accepting:\n{after[:500]}")
+    again = parse_board(after)
+    if again is None or again["state"] != "mine":
+        raise Smoke(f"the board should say you took it: {again}")
+    if "already took" not in ok("accept_quest", reason="smoke test"):
+        raise Smoke("a second accept_quest should say you already took it")
+
+
+@case("crack_geode")
+def crack_geode():
+    """crack_geode pays Clint 25g and draws the treasure; it refuses away from the Blacksmith and without money."""
+    reset("Farm")
+    debug("add_item", id="(O)535", qty=3)  # Geode
+    geodes = inventory_count("Geode")
+    if f"{geodes}x Geode" not in ok("crack_geode"):
+        raise Smoke("crack_geode() does not list the geodes in the pack")
+    good, text = call("crack_geode", item="Geode", reason="smoke test")
+    if good or "Blacksmith" not in text:
+        raise Smoke(f"cracking away from the Blacksmith should fail naming it: {text.splitlines()[0]}")
+    debug("set_time", time=1000)
+    good, text = call("travel_to", location="Blacksmith", reason="smoke test")
+    if not good:
+        raise SkipCase(f"the Blacksmith is not reachable today: {text.splitlines()[0]}")
+    good, text = call("crack_geode", item="Geode", quantity=2, reason="smoke test")
+    if not good and "Clint is not here" in text:
+        raise SkipCase("Clint is not in the Blacksmith at this time")
+    if not good or not text.startswith("Clint cracked 2x Geode for 50g"):
+        raise Smoke(f"crack_geode x2 failed: {text.splitlines()[0]}")
+    if inventory_count("Geode") != geodes - 2 or parse_money_left(text) != 1950:
+        raise Smoke(f"expected 2 geodes used and 1950g left: {text.splitlines()[0]}")
+    debug("set_money", n=10)
+    good, text = call("crack_geode", item="Geode", reason="smoke test")
+    if good or "not enough money" not in text:
+        raise Smoke(f"cracking without money should fail: {text.splitlines()[0]}")
+
+
+@case("trash")
+def trash():
+    """trash removes items, never tools, and wants confirm=true for valuables (gold quality)."""
+    reset("Farm")
+    debug("add_item", id="(O)168", qty=5)  # Trash
+    junk = inventory_count("Trash")
+    text = ok("trash", item="Trash", quantity=2, reason="smoke test")
+    if not text.startswith("Trashed 2x Trash") or inventory_count("Trash") != junk - 2:
+        raise Smoke(f"trashing 2 Trash went wrong: {text.splitlines()[0]}")
+    good, text = call("trash", item="Axe", confirm=True, reason="smoke test")
+    if good or "tool" not in text or tool_count() == 0:
+        raise Smoke(f"a tool must never be trashed, even with confirm: {text.splitlines()[0]}")
+    if inventory_stacks("Cauliflower"):
+        raise SkipCase("the pack already holds Cauliflower; the case counts exact stacks")
+    debug("add_item", id="(O)190", qty=1, quality=2)  # Cauliflower (gold)
+    good, text = call("trash", item="Cauliflower", quality="gold", reason="smoke test")
+    if good or "confirm=true" not in text or inventory_stacks("Cauliflower") != {"gold": 1}:
+        raise Smoke(f"gold quality should need confirm and stay in the pack: {text.splitlines()[0]}")
+    text = ok("trash", item="Cauliflower", quality="gold", confirm=True, reason="smoke test")
+    if not text.startswith("Trashed 1x Cauliflower") or inventory_stacks("Cauliflower"):
+        raise Smoke(f"confirmed trash did not remove the Cauliflower: {text.splitlines()[0]}")
+
+
+@case("watch_tv")
+def watch_tv():
+    """watch_tv lists the channels, then watches one and reads the text the TV showed."""
+    reset("Farm")
+    ok("travel_to", location="FarmHouse", reason="smoke test")
+    good, text = call("watch_tv", reason="smoke test")
+    if not good and "no TV" in text:
+        raise SkipCase("the farmhouse has no TV")
+    if not good or "Channels on the TV right now" not in text:
+        raise Smoke(f"watch_tv() did not list the channels: {text.splitlines()[0]}")
+    if "Menu open" in ok("status"):
+        raise Smoke("listing the channels left the TV question open")
+    text = ok("watch_tv", channel="weather", reason="smoke test")
+    if not text.startswith("Watched") or '"' not in text:
+        raise Smoke(f"watching the weather channel showed no text: {text.splitlines()[0]}")
+    if "Menu open" in ok("status"):
+        raise Smoke("watch_tv left a dialogue open")
 
 
 @case("mine_elevator")

@@ -44,7 +44,7 @@ public static class WorldText
         if (p.questLog.Count > 0)
         {
             var quests = p.questLog.Where(q => q != null && !q.completed.Value).Select(q => q.GetName()).Take(4).ToList();
-            if (quests.Count > 0) sb.AppendLine($"Active quests: {string.Join(" | ", quests)}");
+            if (quests.Count > 0) sb.AppendLine($"Active quests: {string.Join(" | ", quests)} (quests has the details)");
         }
         sb.Append(MenuState());
         return sb.ToString().TrimEnd();

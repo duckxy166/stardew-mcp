@@ -73,7 +73,7 @@ Rules:
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
 | Pass out (2:00, no energy) | automatic | | 🟡 | #22 |
-| TV: weather, luck, recipes | action on the TV → question | `interact` + `respond` | 🟡 untested | #14 |
+| TV: weather, luck, recipes | action on the TV → question | `watch_tv(channel)` (macro over `interact` + `respond`: picks the channel, reads every page, reports the learned recipe); weather and luck overlap the calendar outlook (#11) | 🟡 PR for #14, not yet run in game (smoke `watch_tv`) | #14 |
 | Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
 | Totems, books | action button while holding the item (`performUseAction`) | `interact(holding)` without a tile | ✅ totems (smoke `totem`); 🟡 books untested | |
 | Animal care | pet (action), milk/shear (tool), hay (hopper) | `interact`, `use_tool` | 🟡 | #10 |
@@ -86,14 +86,15 @@ Rules:
 | Buy | shop counter → `ShopMenu` | `shop_list`, `buy` | ✅ (PR #45: `tryToPurchaseItem`, recipes, trade items) | #7 |
 | Sell to a shop | click an inventory item in `ShopMenu` | `menu sell` | ❌ | #11 |
 | Tool upgrades | `Blacksmith` → `Blacksmith_Upgrade` → `ShopMenu` | `buy` | 🟡 needs PR #45 (trade items) | #2 |
-| Geodes | `Blacksmith_Process` → `GeodeMenu` | menu adapter | ❌ | #14 |
+| Geodes | `Blacksmith_Process` → `GeodeMenu` | `crack_geode` (macro: pays Clint 25g and draws `Utility.getTreasureFromGeode`; no `GeodeMenu` clicks, so the `menu` adapter is still missing) | 🟡 PR for #14, not yet run in game (smoke `crack_geode`) | #14 |
 | Crafting | crafting tab or `Craft` tile → `CraftingPage` | `craft` (macro over `CraftingRecipe`: list, make N) | 🟡 smoke `craft`, `craft_place_chest` written, not yet run in game; the page itself has no `menu` adapter | #3 |
-| Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
+| Cooking | `kitchen` tile → `CraftingPage` (cooking) | `cook` (macro over `CraftingRecipe(key, true)`: pack plus fridge ingredients; the page itself has no `menu` adapter) | 🟡 PR for #14, not yet run in game (smoke `cook`) | #14 |
 | Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | menu adapter | ❌ | #10 |
 | Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | menu adapter | ❌ | #10 |
 | Rings, boots, hats, clothes | equipment slots in `InventoryPage` | menu adapter | ❌ | #27 |
 | Tailoring, dye, forge | `Tailoring`, `DyePot`, `Forge` tiles | menu adapter | ❌ | |
-| Trash cans | `Garbage` tile | `interact` | 🟡 untested | #14 |
+| Trash cans | `Garbage` tile | `interact` (searching the can in town) | 🟡 untested | #14 |
+| Trash an item | inventory trash can → `Utility.trashItem` | `trash(item, quantity, confirm)` (never tools; valuables need `confirm`) | 🟡 PR for #14, not yet run in game (smoke `trash`) | #14 |
 
 ### People
 
@@ -106,8 +107,8 @@ Rules:
 | Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
 | Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
-| Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
-| Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
+| Help Wanted, quest log | `Billboard` tile, `QuestLog` | `quests` (journal, board, who took it, Special Orders read-only, `share` to the plan board), `accept_quest` (macro: walks to the board, presses Accept); events `quest_accepted`/`quest_completed`/`quest_failed`/`quest_taken_by_other` go to the player log feed | 🟡 PR for #14, not yet run in game (smoke `quests`, `accept_quest`); turning in a quest: `talk_to` with the item | #14 |
+| Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter; `quests` lists the open ones (read-only) | ❌ board, 🟡 listing | #27 |
 | Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
 | Joja | `JojaCDMenu` | menu adapter | ❌ | #26 |
 | Museum | Gunther → `MuseumMenu` | menu adapter | ❌ | #13 |

@@ -25,7 +25,7 @@ public static partial class AgentTools
             Description = "Craft items from the crafting recipes you know, using ingredients in your inventory (costs no energy). " +
                           "craft() lists your recipes with their ingredients and how many you can make right now. craft(recipe, quantity) makes that many " +
                           "(one craft can make several items, e.g. torches). Crafted machines, chests, sprinklers and fences are inventory items: put them in the world with place. " +
-                          "Cooking recipes are not included.",
+                          "Cooking recipes are not included: dishes are made with cook.",
             Schema = Obj(new
             {
                 recipe = Str("Recipe name, e.g. \"Chest\" or \"Furnace\"; empty or \"list\" lists your recipes"),
@@ -114,13 +114,13 @@ public static partial class AgentTools
     }
 
     /// <summary>Key of the known recipe called <paramref name="want"/> (key or display name, exact first, else the first partial match).</summary>
-    private static string? FindRecipeKey(string want)
+    private static string? FindRecipeKey(string want, bool cooking = false)
     {
         string? partial = null;
-        foreach (var key in P.craftingRecipes.Keys.ToList())
+        foreach (var key in cooking ? P.cookingRecipes.Keys.ToList() : P.craftingRecipes.Keys.ToList())
         {
             CraftingRecipe cr;
-            try { cr = new CraftingRecipe(key, false); }
+            try { cr = new CraftingRecipe(key, cooking); }
             catch (Exception) { continue; }
             if (key.Equals(want, StringComparison.OrdinalIgnoreCase) || cr.DisplayName.Equals(want, StringComparison.OrdinalIgnoreCase))
                 return key;
@@ -130,23 +130,24 @@ public static partial class AgentTools
         return partial;
     }
 
-    private static string RecipeList()
+    /// <summary>The recipes you know. With <paramref name="cooking"/> the cooking recipes; <paramref name="extra"/> adds ingredients outside the pack (the fridge).</summary>
+    private static string RecipeList(bool cooking = false, IList<Item>? extra = null)
     {
         var ready = new List<string>();
         var missing = new List<string>();
-        foreach (var key in P.craftingRecipes.Keys.ToList())
+        foreach (var key in cooking ? P.cookingRecipes.Keys.ToList() : P.craftingRecipes.Keys.ToList())
         {
             CraftingRecipe cr;
-            try { cr = new CraftingRecipe(key, false); }
+            try { cr = new CraftingRecipe(key, cooking); }
             catch (Exception) { continue; }
-            int can = cr.getCraftableCount((IList<Item>?)null);
+            int can = cr.getCraftableCount(extra);
             var makes = cr.numberProducedPerCraft > 1 ? $" (makes {cr.numberProducedPerCraft})" : "";
             var line = $"  {cr.DisplayName}{makes}: {Ingredients(cr)}";
-            if (can > 0) ready.Add($"{line} [you can craft {can}]");
+            if (can > 0) ready.Add($"{line} [you can {(cooking ? "cook" : "craft")} {can}]");
             else missing.Add(line);
         }
-        var sb = new StringBuilder($"Crafting recipes you know ({ready.Count + missing.Count}):\n");
-        sb.AppendLine("Craftable now:");
+        var sb = new StringBuilder($"{(cooking ? "Cooking recipes" : "Crafting recipes")} you know ({ready.Count + missing.Count}):\n");
+        sb.AppendLine(cooking ? "Cookable now:" : "Craftable now:");
         sb.AppendLine(ready.Count == 0 ? "  none" : string.Join("\n", ready));
         sb.AppendLine("Missing ingredients:");
         sb.Append(missing.Count == 0 ? "  none" : string.Join("\n", missing));

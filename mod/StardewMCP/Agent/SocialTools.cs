@@ -60,6 +60,8 @@ public static class PlanBoard
             foreach (var h in shown)
                 sb.AppendLine($"  #{h.Id} day {h.Day} {h.Time} {h.Author} {(h.Text.Length == 0 ? "cleared" : "set")} \"{h.Section}\"" +
                               (h.Text.Length == 0 ? "" : $": {Clip(h.Text, 80)}"));
+            var quests = AgentTools.QuestPlanHint();
+            if (quests.Length > 0) sb.AppendLine(quests);
             return sb.ToString().TrimEnd();
         }
     }
