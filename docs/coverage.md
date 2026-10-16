@@ -88,7 +88,9 @@ Rules:
 | Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
 | Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | menu adapter | ❌ | #10 |
 | Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | menu adapter | ❌ | #10 |
-| Rings, boots, hats, clothes | equipment slots in `InventoryPage` | menu adapter | ❌ | #27 |
+| Rings, boots, hats | equipment slots in `InventoryPage` | `equip` (`Farmer.Equip`, else the slot field plus `onEquip`/`onUnequip`); `status` and `inventory` show them | 🟡 untested | #27 |
+| Bait, tackle | drop onto the rod in `InventoryPage` | `equip` (the rod's own `attach`); `inventory` shows what is on the rod | 🟡 untested | #27 |
+| Clothes (shirts, pants) | equipment slots in `InventoryPage` | menu adapter | ❌ | |
 | Tailoring, dye, forge | `Tailoring`, `DyePot`, `Forge` tiles | menu adapter | ❌ | |
 | Trash cans | `Garbage` tile | `interact` | 🟡 untested | #14 |
 
@@ -104,7 +106,7 @@ Rules:
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
 | Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
-| Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
+| Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard`, its Accept button | `special_orders` (`list`, `accept`, `active`); `ActiveSpecialOrdersText()` is for `quests` (#14) | 🟡 untested | #27 |
 | Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
 | Joja | `JojaCDMenu` | menu adapter | ❌ | #26 |
 | Museum | Gunther → `MuseumMenu` | menu adapter | ❌ | #13 |

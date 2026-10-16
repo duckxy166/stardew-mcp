@@ -266,6 +266,7 @@ public static partial class AgentTools
                 Schema = Obj(new { item = Str("Item name"), reason = Str(ReasonDesc) }, "item", "reason"),
                 Run = Eat
             },
+            EquipTool(), SpecialOrdersTool(),
             new()
             {
                 Name = "wait",

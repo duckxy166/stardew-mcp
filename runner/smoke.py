@@ -459,6 +459,64 @@ def choose_profession():
         raise Smoke("a profession choice is still pending after bedtime")
 
 
+@case("equip")
+def equip():
+    """#27: a ring goes on the left hand, bait onto the rod, and status/inventory show both. Skips if the debug API cannot make the items."""
+    reset("Farm")
+    try:
+        debug("add_item", id="(O)516")            # Small Glow Ring
+        debug("add_item", id="(T)FiberglassRod")  # a rod with bait and tackle slots
+        debug("add_item", id="(O)685", qty=10)    # Bait
+    except Smoke as e:
+        raise SkipCase(f"the debug API could not add the test items: {e}")
+
+    text = ok("equip", item="Small Glow Ring", slot="left", reason="smoke test")
+    if not text.startswith("Equipped Small Glow Ring"):
+        raise Smoke(f"expected 'Equipped Small Glow Ring', got: {text.splitlines()[0]}")
+    status = ok("status")
+    if not re.search(r"^Equipped: left ring Small Glow Ring \u00b7 right ring ", status, re.M):
+        raise Smoke(f"status does not show the ring on the left hand:\n{status}")
+    if inventory_count("Small Glow Ring") != 0:
+        raise Smoke("the equipped ring is still in the inventory")
+
+    text = ok("equip", item="Bait", reason="smoke test")
+    if not text.startswith("Attached 10 x Bait"):
+        raise Smoke(f"expected 'Attached 10 x Bait', got: {text.splitlines()[0]}")
+    inv = ok("inventory")
+    if not re.search(r"^Fishing rod .*: bait Bait x10", inv, re.M):
+        raise Smoke(f"inventory does not show the bait on the rod:\n{inv}")
+    if inventory_count("Bait") != 0:
+        raise Smoke("the attached bait is still in the inventory")
+
+
+@case("special_orders")
+def special_orders():
+    """#27: the board lists its orders and one can be accepted. Skips while the board is not open yet or offers nothing."""
+    reset("Farm")
+    if "special orders" not in ok("special_orders", action="active").lower():
+        raise Smoke("special_orders(active) did not answer about special orders")
+    good, text = call("special_orders", action="list", reason="smoke test")
+    try:
+        if not good:
+            if "no Special Orders board" in text:
+                raise SkipCase("the Special Orders board is not open yet (fall of year 1); run the gate on a later save")
+            raise Smoke(f"special_orders(list) failed: {text.splitlines()[0]}")
+        if "no orders are posted" in text:
+            raise SkipCase("the board has no orders posted")
+        indexes = re.findall(r"^index (\d+) ", text, re.M)
+        if not indexes:
+            raise Smoke(f"the board text lists no 'index N' order:\n{text}")
+        good, text = call("special_orders", action="accept", index=int(indexes[0]), reason="smoke test")
+        if not good and "not offering Accept" in text:
+            raise SkipCase("the board does not offer Accept (an order from it was already taken)")
+        if not good or not text.startswith("Accepted"):
+            raise Smoke(f"expected 'Accepted ...', got: {text.splitlines()[0]}")
+        if "no accepted special orders" in ok("special_orders", action="active"):
+            raise Smoke("the accepted order is not in special_orders(active)")
+    finally:
+        call("close_menu")
+
+
 def place_near(item_id: str) -> tuple[int, int]:
     """Place an object (debug) in the middle of a run of three free tiles near the player, so a side stays reachable."""
     for run in parse_tillable_runs(ok("look", radius=10), 3):
