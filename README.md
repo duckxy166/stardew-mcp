@@ -58,6 +58,9 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `wait`, `go_to_bed` | Let time pass, end the day |
 | `say`, `whisper`, `emote`, `give` | Multi-player (split-screen): chat to everyone, tell one player privately, show an emote, hand an item to a nearby player. All cost no game time |
 | `plan_read`, `plan_edit` | Shared plan board with an edit history (author and time) |
+| `bundles` | Community Center bundles room by room: what each needs, what is donated (and by whom), the reward, and which of your items fit. Costs no game time |
+| `donate_bundle` | Donate an inventory item (or gold, for the Vault) to the first Community Center bundle that needs it, through the game's own bundle page |
+| `museum` | `list` the items the Museum still accepts, `donate` one (or all) to the next free display spot, collect `rewards` from Gunther |
 
 ### Other endpoints
 

@@ -105,9 +105,9 @@ Rules:
 | Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
-| Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
+| Community Center | `JunimoNoteMenu` | `bundles` (reads `Bundles`/`BundleData`), `donate_bundle` (opens the room's `JunimoNoteMenu` and clicks the bundle, the inventory slot and an ingredient slot; success is read back from `Bundles`) | 🟡 untested, needs the CC open | #13 |
 | Joja | `JojaCDMenu` | menu adapter | ❌ | #26 |
-| Museum | Gunther → `MuseumMenu` | menu adapter | ❌ | #13 |
+| Museum | Gunther → `MuseumMenu` | `museum`: `list` via `isItemSuitableForDonation`; `donate` writes `museumPieces` on the next free display tile (not the `MuseumMenu` UI, which needs pointer coordinates); `rewards` answers Gunther's "Collect" and takes the grab menu | 🟡 untested | #13 |
 
 ### Adventure
 

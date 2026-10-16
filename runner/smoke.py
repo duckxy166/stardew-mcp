@@ -570,6 +570,107 @@ def mine_elevator():
         debug("warp", location="Farm", x=x, y=y)
 
 
+# The warp tiles below are the usual door-side tiles of each interior; adjust them if a save puts you in a wall.
+CC_TILE = (32, 22)
+MUSEUM_TILE = (3, 9)
+
+
+def bundle_line(text: str, name: str) -> tuple[str, int, int] | None:
+    """(whole line, filled, required) of an unfinished bundle in `bundles` output, e.g. '[0] Spring Crops 1/4 → ...'."""
+    for line in text.splitlines():
+        m = re.match(rf"\s*\[\d+\] {re.escape(name)} (\d+)/(\d+)", line)
+        if m:
+            return line, int(m.group(1)), int(m.group(2))
+    return None
+
+
+@case("bundles")
+def bundles():
+    """bundles reads the Community Center (needs its door unlocked; the data itself exists from day 1)."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="CommunityCenter", x=CC_TILE[0], y=CC_TILE[1])
+    try:
+        good, text = call("bundles")
+        if not good:
+            raise SkipCase(f"bundles are closed on this save: {text.splitlines()[0]}")
+        for room in ("Pantry", "Crafts Room", "Fish Tank", "Boiler Room", "Vault", "Bulletin Board"):
+            if f"== {room}:" not in text:
+                raise Smoke(f"bundles does not list the {room}:\n{text[:600]}")
+        if "Spring Crops" not in text:
+            raise Smoke(f"bundles does not list the Spring Crops bundle:\n{text[:600]}")
+        good, text = call("bundles", room="Pantry")
+        if not good or "== Crafts Room" in text or "Spring Crops" not in text:
+            raise Smoke(f"bundles(room=Pantry) should list only the Pantry:\n{text[:600]}")
+        if call("bundles", room="Nowhere")[0]:
+            raise Smoke("bundles accepted an unknown room")
+    finally:
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("bundle_donate")
+def bundle_donate():
+    """donate_bundle opens the Pantry's note, drops a Parsnip into Spring Crops and leaves the menu closed."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="CommunityCenter", x=CC_TILE[0], y=CC_TILE[1])
+    try:
+        good, text = call("bundles", room="Pantry")
+        if not good:
+            raise SkipCase(f"bundles are closed on this save: {text.splitlines()[0]}")
+        if "can't read Junimo script" in text:
+            raise SkipCase("the Wizard has not taught this farmer Junimo script yet; run the gate on a later save")
+        line = bundle_line(text, "Spring Crops")
+        if line is None:
+            raise SkipCase("the Spring Crops bundle is already complete on this save")
+        _, filled, required = line
+        if "Parsnip" not in line[0].split("needs", 1)[-1]:
+            raise SkipCase("a Parsnip is already in the Spring Crops bundle")
+        have = inventory_count("Parsnip")
+        debug("add_item", id="(O)24", qty=1)  # Parsnip
+        text = ok("donate_bundle", item="Parsnip", bundle="Spring Crops", reason="smoke test")
+        if f"{filled + 1}/{required}" not in text:
+            raise Smoke(f"expected Spring Crops at {filled + 1}/{required}: {text.splitlines()[0]}")
+        if call("menu")[0]:
+            raise Smoke("a menu was left open after donate_bundle")
+        if inventory_count("Parsnip") != have:
+            raise Smoke(f"the donated Parsnip should be gone; have {inventory_count('Parsnip')}, expected {have}")
+        after = bundle_line(ok("bundles", room="Pantry"), "Spring Crops")
+        if after is not None and after[1] != filled + 1:
+            raise Smoke(f"bundles shows {after[1]} filled after the donation, expected {filled + 1}")
+        if have == 0 and call("donate_bundle", item="Parsnip", bundle="Spring Crops", reason="smoke test")[0]:
+            raise Smoke("donating a Parsnip that is not in the inventory succeeded")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("museum")
+def museum():
+    """museum list shows an artifact the Museum accepts; donate puts it on display and it stops being offered."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="ArchaeologyHouse", x=MUSEUM_TILE[0], y=MUSEUM_TILE[1])
+    try:
+        debug("add_item", id="(O)96", qty=1)  # Dwarf Scroll I
+        text = ok("museum")
+        if "Dwarf Scroll I" not in text:
+            raise SkipCase("the Museum already displays a Dwarf Scroll I on this save")
+        have = inventory_count("Dwarf Scroll I")
+        text = ok("museum", action="donate", item="Dwarf Scroll I", reason="smoke test")
+        if "Donated to the Museum: Dwarf Scroll I" not in text:
+            raise Smoke(f"donate did not report the piece: {text.splitlines()[0]}")
+        if inventory_count("Dwarf Scroll I") != have - 1:
+            raise Smoke("the donated Dwarf Scroll I is still in the inventory")
+        if "Dwarf Scroll I" in ok("museum", action="list"):
+            raise Smoke("the Museum still offers a piece that is already on display")
+        if have == 1 and call("museum", action="donate", item="Dwarf Scroll I", reason="smoke test")[0]:
+            raise Smoke("donating a Dwarf Scroll I that is not in the inventory succeeded")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
 # ---------------------------------------------------------------------- multi-seat (social tools)
 # These need split-screen (SplitScreen: true in config.json) and run last: once p2/p3 have talked to the mod
 # they count as connected AIs, and an idle one holds the world frozen until it is disconnected again.
