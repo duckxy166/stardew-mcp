@@ -248,6 +248,8 @@ public static partial class AgentTools
         int took = Snapshot().GetValueOrDefault(item.DisplayName) - had;
         if (took <= 0) { c.Fail($"Nothing was taken (is your inventory full?). Inside: {Names(g.ItemsToGrabMenu.actualInventory)}"); yield break; }
         c.Result = $"Took {took} x {item.DisplayName}{(took < count ? $" ({count} asked; your inventory is full)" : "")}.";
+        // Another seat's chest: allowed, but logged as a theft (see Ownership).
+        if (g.context is Chest source) Ownership.OnChestTake(Rt.Log.Player, Loc, source, $"{took} x {item.DisplayName}");
     }
 
     private static IEnumerator Put(ItemGrabMenu g, JsonElement a, CallContext c)
@@ -272,6 +274,8 @@ public static partial class AgentTools
         int put = had - Snapshot().GetValueOrDefault(item.DisplayName);
         if (put <= 0) { c.Fail($"{item.DisplayName} did not go in (is {MenuName(g)} full?)."); yield break; }
         c.Result = $"Put {put} x {item.DisplayName} into {MenuName(g)}{(put < count ? $" ({count} asked; it is full)" : "")}.";
+        // Filling a chest nobody owns makes it yours.
+        if (g.context is Chest target && Ownership.OnChestPut(Rt.Log.Player, Loc, target) is { } claimed) c.Result += " " + claimed;
     }
 
     private static int IndexOf(IList<Item> items, Item item)

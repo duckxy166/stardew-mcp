@@ -814,6 +814,211 @@ def send_money():
         call("close_menu")
 
 
+def wallet_of(seat: str) -> int:
+    return next(p for p in fresh_state()["players"] if p["id"] == seat)["state"]["money"]
+
+
+def feed(kind: str) -> list[dict]:
+    """The viewers' feed entries of one kind, oldest first."""
+    return [e for e in _request("/api/feed")["entries"] if e.get("kind") == kind]
+
+
+@case("wallets")
+@social
+def wallets():
+    """Separate wallets: every seat has its own money, a purchase only touches the buyer, the startup check agrees."""
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; run the gate on another day to cover the shop")
+    reset("Farm")
+    debug("separate_wallets")
+    debug("set_money", n=2000)
+    debug_seat("p2", "set_money", n=500)
+    debug_seat("p3", "set_money", n=300)
+    if "Money 500g" not in ok_seat("p2", "status"):
+        raise Smoke("p2's status does not show its own wallet (500g)")
+    got = (wallet_of("p1"), wallet_of("p2"), wallet_of("p3"))
+    if got != (2000, 500, 300):
+        raise Smoke(f"expected wallets 2000/500/300 for p1/p2/p3, got {got}")
+    setup = fresh_state().get("setup") or {}
+    if not setup.get("separateWallets") or setup.get("cabins", 0) < 3 or setup.get("problems"):
+        raise Smoke(f"the startup check in /api/state should be clean with separate wallets and 3 cabins: {setup}")
+
+    unfreeze()  # p2 and p3 are connected and idle, which would hold the walk to the shop
+    open_shop("SeedShop", 1000)
+    text = ok("buy", item="Parsnip Seeds", quantity=2, reason="smoke test")
+    m = re.search(r"for (\d+)g", text)
+    if not m:
+        raise Smoke(f"buy result has no price: {text.splitlines()[0]}")
+    got = (wallet_of("p1"), wallet_of("p2"), wallet_of("p3"))
+    if got != (2000 - int(m.group(1)), 500, 300):
+        raise Smoke(f"only p1's wallet should drop by {m.group(1)}g, got {got}")
+    ok("close_menu")
+
+
+@case("pay")
+@social
+def pay():
+    """pay runs the ledger's Send money for p1, tells p2 and logs both wallets."""
+    reset("Farm")
+    debug("separate_wallets")
+    debug("set_money", n=2000)
+    debug_seat("p2", "set_money", n=500)
+    for bad in ({"to": "p2", "amount": 5000}, {"to": "p2", "amount": 0}, {"to": "p1", "amount": 10}, {"to": "nobody", "amount": 10}):
+        if call("pay", reason="smoke test", **bad)[0]:
+            raise Smoke(f"pay accepted {bad}")
+    p2_before = wallet_of("p2")
+
+    unfreeze()  # the walk to Lewis's house is an action, and an idle connected seat would hold it
+    text = ok("pay", to="p2", amount=150, reason="smoke test: lunch")
+    if "Paid 150g" not in text:
+        raise Smoke(f"unexpected pay result: {text.splitlines()[0]}")
+    t0, now = time.time(), (0, 0)
+    while time.time() - t0 < 5:
+        now = (wallet_of("p1"), wallet_of("p2"))  # each read waits for the state snapshot to catch up
+        if now == (1850, p2_before + 150):
+            break
+    else:
+        raise Smoke(f"expected p1 1850g and p2 {p2_before + 150}g, got {now[0]}g and {now[1]}g")
+    heard = hear("p2")
+    if "paid you 150g" not in heard or "lunch" not in heard:
+        raise Smoke(f"p2 was not told about the payment:\n{heard}")
+    seen = [e for e in feed("pay") if e.get("player") == "p1"]
+    args = (seen[-1].get("args") or {}) if seen else {}
+    if args.get("amount") != 150 or (args.get("payer") or {}).get("before") != 2000 or (args.get("payer") or {}).get("after") != 1850:
+        raise Smoke(f"the feed's pay entry lacks amount and both wallets: {seen[-1:] }")
+
+
+@case("ownership")
+@social
+def ownership():
+    """claim / unclaim: look shows the owner, /api/state lists it, another seat cannot claim over it."""
+    reset("Farm")
+    x, y = place_near("(BC)130")  # Chest
+
+    def chest_label() -> str:
+        for label, tiles in parse_things(ok("look", radius=10), "O"):
+            if label.startswith("Chest") and (x, y) in tiles:
+                return label
+        raise Smoke(f"no Chest at ({x},{y}) in look")
+
+    if "owner" in chest_label():
+        raise Smoke("an unclaimed chest already shows an owner")
+    if "You are p1" not in ok("status"):
+        raise Smoke("status does not say which seat you are")
+    if "You now own" not in ok("claim", x=x, y=y):
+        raise Smoke("claim did not take the chest")
+    if "owner: p1" not in chest_label():
+        raise Smoke(f"look should show the chest owner: {chest_label()}")
+    owned = ((fresh_state().get("ownership") or {}).get("owners") or {}).get("p1", {}).get("objects", [])
+    if not any(o.get("x") == x and o.get("y") == y for o in owned):
+        raise Smoke(f"/api/state ownership lacks p1's chest at ({x},{y}): {owned}")
+
+    loc, px, py = p1_tile()
+    unfreeze()
+    debug_seat("p2", "warp", location=loc, x=px + 1, y=py)
+    good, text = call_seat("p2", "claim", {"x": x, "y": y})
+    if good or "p1" not in text:
+        raise Smoke(f"p2 should not be able to claim p1's chest: {text.splitlines()[0]}")
+
+    runs = parse_tillable_runs(ok_seat("p1", "look", radius=10), 3)
+    if not runs:
+        raise Smoke("no free 3-tile run near the player for an area claim")
+    ax, ay = runs[0][0]
+    if "3x1 area" not in ok_seat("p1", "claim", x=ax, y=ay, width=3, height=1):
+        raise Smoke("claim of a 3x1 area failed")
+    if call_seat("p2", "claim", {"x": ax + 2, "y": ay, "width": 2, "height": 1})[0]:
+        raise Smoke("p2 claimed ground that overlaps p1's area")
+    ok_seat("p1", "unclaim", x=ax + 1, y=ay)  # any tile of the area releases it
+    if not call_seat("p2", "claim", {"x": ax + 2, "y": ay, "width": 2, "height": 1})[0]:
+        raise Smoke("p2 could not claim the ground p1 released")
+
+    ok_seat("p1", "unclaim", x=x, y=y)
+    if "owner" in chest_label():
+        raise Smoke("the chest still shows an owner after unclaim")
+    if call_seat("p1", "unclaim", {"x": x, "y": y})[0]:
+        raise Smoke("unclaim of something you do not own succeeded")
+
+
+@case("theft")
+@social
+def theft():
+    """Another seat taking from p1's chest, or collecting p1's machine, logs a `theft` entry; p1 taking its own does not."""
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=3)  # Parsnip
+    x, y = place_near("(BC)130")  # Chest
+    ok("claim", x=x, y=y)
+    try:
+        ok("interact", x=x, y=y, reason="smoke test: open the chest")
+        ok("menu", action="put", item="Parsnip", reason="smoke test")
+        call("close_menu")
+        before = len(feed("theft"))
+        ok("interact", x=x, y=y, reason="smoke test: open the chest again")
+        ok("menu", action="take", item="Parsnip", count=1, reason="smoke test: the owner takes its own")
+        call("close_menu")
+        if len(feed("theft")) != before:
+            raise Smoke("p1 taking from its own chest was logged as a theft")
+
+        loc, px, py = p1_tile()
+        unfreeze()
+        debug_seat("p2", "warp", location=loc, x=px + 1, y=py)
+        ok_seat("p2", "interact", x=x, y=y, reason="smoke test: open p1's chest")
+        ok_seat("p2", "menu", action="take", item="Parsnip", reason="smoke test: take from p1's chest")
+        call_seat("p2", "close_menu", {})
+        mine = [e for e in feed("theft")[before:] if e.get("player") == "p2" and (e.get("args") or {}).get("owner") == "p1"]
+        a = (mine[-1].get("args") or {}) if mine else {}
+        if not mine or a.get("taker") != "p2" or "Parsnip" not in a.get("what", "") or (a.get("x"), a.get("y")) != (x, y):
+            raise Smoke(f"expected a theft entry p2 -> p1 for the Parsnips at ({x},{y}), got {mine[-1:]}")
+        known = (fresh_state().get("ownership") or {}).get("thefts") or []
+        if not any(t.get("taker") == "p2" and t.get("owner") == "p1" for t in known):
+            raise Smoke("/api/state ownership lists no theft")
+
+        # a machine: p1 loads and claims a furnace, p2 collects the bars
+        debug("add_item", id="(O)378", qty=10)  # Copper Ore
+        debug("add_item", id="(O)382", qty=2)  # Coal
+        fx, fy = place_near("(BC)13")  # Furnace
+        ok("claim", x=fx, y=fy)
+        unfreeze()
+        ok("interact", x=fx, y=fy, holding="Copper Ore", reason="smoke test")
+        ok("wait", minutes=40, reason="smoke test: smelting")
+        unfreeze()
+        before = len(feed("theft"))
+        ok_seat("p2", "interact", x=fx, y=fy, reason="smoke test: collect p1's bars")
+        bars = [e for e in feed("theft")[before:] if e.get("player") == "p2" and "Copper Bar" in (e.get("args") or {}).get("what", "")]
+        if not bars:
+            raise Smoke("collecting p1's finished Copper Bar did not log a theft")
+    finally:
+        for seat in ("p1", "p2"):
+            try:
+                call_seat(seat, "close_menu", {})
+            except Exception:
+                pass
+
+
+@case("bedtime")
+@social
+def bedtime():
+    """From BedtimeWarnTime an AI that is not in bed gets one reminder a day, and status lists who is in bed."""
+    reset("Farm")
+    ok_seat("p2", "status")  # p2 is now a connected AI
+    try:
+        debug("set_time", time=2400)
+        heard, t0 = "", time.time()
+        while time.time() - t0 < 6 and "past bedtime" not in heard:
+            heard += hear("p2", "inventory")
+            time.sleep(0.3)
+        if "past bedtime" not in heard or "go_to_bed" not in heard:
+            raise Smoke(f"p2 got no bedtime reminder at 24:00:\n{heard}")
+        if "past bedtime" in hear("p2", "inventory") + hear("p2"):
+            raise Smoke("p2 was reminded twice on the same day")
+        status = ok_seat("p2", "status")
+        if "Bed:" not in status or "p2" not in status:
+            raise Smoke(f"status does not list who is in bed after bedtime:\n{status}")
+        if not any(s.get("id") == "p2" for s in (fresh_state().get("sleep") or {}).get("seats", [])):
+            raise Smoke("/api/state sleep lacks p2")
+    finally:
+        debug("set_time", time=900)
+
+
 CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
 
 

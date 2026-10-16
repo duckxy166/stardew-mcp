@@ -118,7 +118,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(Core()));
+        return new List<ToolDef>(SocialTools.All().Concat(Core()).Concat(Economy()));
     }
 
     private static List<ToolDef> Core()
@@ -618,6 +618,7 @@ public static partial class AgentTools
             Utility.tryToPlaceItem(loc, item, t.X * 64 + 32, t.Y * 64 + 32);
             yield return Ticks(8);
             bool ok = (!hadCrop && dirt.crop != null) || dirt.fertilizer.Value != hadFert;
+            if (!hadCrop && dirt.crop != null) Ownership.OnPlanted(Rt.Log.Player, loc, t.X, t.Y);
             if (ok) planted++;
             else lines.Add($"({t.X},{t.Y}) could not plant {item.DisplayName} (occupied, wrong season, or not plantable here)");
         }
@@ -630,6 +631,7 @@ public static partial class AgentTools
         var before = Snapshot();
         var loc = Loc;
         var lines = new List<string>();
+        var taken = new Dictionary<string, (Point tile, List<string> crops)>(); // owner -> ripe crops harvested from their ground
         foreach (var t in tiles)
         {
             if (Game1.activeClickableMenu != null) { lines.Add("Stopped: a menu opened (inventory full?)."); break; }
@@ -637,11 +639,20 @@ public static partial class AgentTools
             yield return WalkAdjacent(t, sub);
             if (!sub.Ok) { lines.Add($"({t.X},{t.Y}) skipped: {sub.Result}"); continue; }
             var label = WorldText.Describe(loc, t.X, t.Y).label;
+            var ripe = Ownership.RipeCrop(loc, t.X, t.Y);
+            var owner = ripe != null ? Ownership.OwnerOf(loc, t.X, t.Y) : null;
             loc.checkAction(new xTile.Dimensions.Location(t.X, t.Y), Game1.viewport, P);
             yield return Ticks(20);
             yield return WaitIdle(120);
             lines.Add($"({t.X},{t.Y}) {label ?? "empty"} → now: {WorldText.Describe(loc, t.X, t.Y).label ?? "empty"}");
+            if (ripe != null && owner != null && owner != Rt.Log.Player && Ownership.RipeCrop(loc, t.X, t.Y) == null)
+            {
+                if (!taken.TryGetValue(owner, out var theft)) taken[owner] = theft = (t, new List<string>());
+                theft.crops.Add(ripe);
+            }
         }
+        foreach (var (victim, theft) in taken)
+            Ownership.ReportTheft(Rt.Log.Player, victim, string.Join(", ", theft.crops.GroupBy(n => n).Select(g => $"{g.Count()} x {g.Key}")), "crops", loc, theft.tile);
         yield return Ticks(30);
         var diff = Diff(before);
         c.Result = string.Join("\n", lines) + "\n" + (diff.Length > 0 ? diff : "Nothing was collected.");
@@ -695,6 +706,10 @@ public static partial class AgentTools
         else if (P.ActiveObject != null) P.CurrentToolIndex = FirstToolSlot();
         var held = P.CurrentItem?.DisplayName;
         var was = atTile ? WorldText.Describe(Loc, t.X, t.Y).label : null;
+        // Ownership: remember which tile this seat opened (chest menus are traced back to it) and what a machine had ready.
+        if (atTile) Ownership.NoteTouched(Rt.Log.Player, Loc, t);
+        var readyOutput = atTile ? Ownership.ReadyOutput(Loc, t.X, t.Y) : null;
+        var machineOwner = readyOutput != null ? Ownership.OwnerOf(Loc, t.X, t.Y) : null;
 
         string what;
         if (atTile)
@@ -716,6 +731,12 @@ public static partial class AgentTools
             // After its animation a totem hides the farmer and warps after a delayed fade.
             for (int i = 0; i < 600 && (!Game1.displayFarmer || Game1.globalFade || P.freezePause > 0); i++) yield return null;
             yield return WaitIdle();
+        }
+
+        if (readyOutput != null && machineOwner != null && Loc == startLoc && Ownership.ReadyOutput(Loc, t.X, t.Y) == null)
+        {
+            var machine = Loc.Objects.TryGetValue(t.ToVector2(), out var mo) ? mo.DisplayName : "machine";
+            Ownership.ReportTheft(Rt.Log.Player, machineOwner, readyOutput, machine, Loc, t);
         }
 
         if (slot >= 0 && atTile) what += $" holding {held}";

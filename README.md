@@ -58,6 +58,8 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `wait`, `go_to_bed` | Let time pass, end the day |
 | `say`, `whisper`, `emote`, `give` | Multi-player (split-screen): chat to everyone, tell one player privately, show an emote, hand an item to a nearby player. All cost no game time |
 | `plan_read`, `plan_edit` | Shared plan board with an edit history (author and time) |
+| `claim`, `unclaim` | Multi-player: mark a chest, machine or area of ground (your plot) as yours; `look` shows `owner: pN`. Taking from or harvesting another player's claim is allowed but logged as a `theft` event. No game time |
+| `pay` | Multi-player: send gold from your wallet to another player through the game's own ledger book at Lewis's (needs separate wallets; walking there takes game time) |
 
 ### Other endpoints
 
@@ -85,6 +87,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `LockHostInput` | `true` | Split-screen: ignore the real keyboard/mouse on P1 once a save is loaded |
 | `CleanFrames` | `true` | Split-screen: frozen frames look live (no Paused banner, HUD kept), no cursors, gamepad hint or join messages |
 | `AutoZoom` | `true` | Split-screen: zoom each screen to about 20 tiles across |
+| `BedtimeWarnTime` | `2400` | Game time (HHMM, 1800-2550) after which an AI that is not in bed gets one reminder a day; `0` = off. The game itself passes everyone out at 02:00 |
 
 The SMAPI console command `mcp_freeze [on|off]` toggles time freezing at runtime.
 
@@ -103,6 +106,10 @@ The mod joins P2–P4 itself, no gamepads needed, in the game's 2×2 grid:
 The whole world (clock, farmers, NPCs) is frozen while any connected AI is thinking, so a slow model
 never loses game time. `/api/state` lists every seat with its current action and thinking time.
 The first time the game starts its local co-op server, Windows Firewall may ask once; allow it.
+
+The filming save needs separate wallets and 3 cabins; the mod checks this at startup and logs a warning when it
+is not so. How to create the save, who owns what (`claim`, `theft` events) and the sleep rule are in
+[docs/filming-save.md](docs/filming-save.md).
 
 `ThoughtLanguage` only changes what the MCP tools ask the AI to write. The overlay's own labels and
 `runner/system_prompt.md` are still written for Thai viewers, so edit those too if you switch language.

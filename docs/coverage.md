@@ -129,13 +129,14 @@ Use the game's multiplayer features first. Add mod rules only where the game has
 
 | System | How the game does it | Covered by | Status | Issue |
 |---|---|---|---|---|
-| Separate wallets | host reads the ledger in Lewis's house (`LedgerBook`); it switches overnight | `interact` + `respond` | 🟡 untested | |
-| Send money | ledger → `SendMoney` → recipient → `DigitEntryMenu`; chat shows "X sent Y" | `interact` + `respond` + `menu amount` | ✅ smoke `send_money` (split-screen) | |
+| Separate wallets | host reads the ledger in Lewis's house (`LedgerBook`); it switches overnight | `interact` + `respond`; startup check warns when the save lacks them (`setup` in `/api/state`), how to make the save: `docs/filming-save.md` | 🟡 written, smoke `wallets` not run yet | #52 |
+| Send money | ledger → `SendMoney` → recipient → `DigitEntryMenu`; chat shows "X sent Y" | `interact` + `respond` + `menu amount`; `pay` runs the same steps and logs both wallets | ✅ smoke `send_money` (split-screen); 🟡 `pay` smoke not run yet | #52 |
 | Loans, debts | no mechanic | a promise on the plan board, paid with Send money | story | #39, #48 |
 | Give an item to a player | action holding the item → `SendProposal(Gift)`: one item, the receiver may decline | `give` (PR #50 moves the stack directly, no decline) | ✅ different path | #39 |
 | Marriage, dance, baby between players | `SendProposal(Marriage/Dance/Baby)` → `PendingProposalDialog` | `interact(holding)` + `menu choose` | ❌ | |
-| Owned plots and chests | no mechanic | mod rule: a cabin and its chests belong to its owner; plots on the plan board | ❌ | #40 |
-| Sleep, festival start/end | `ReadyCheckDialog` waits for every online farmer, P4 included | AI seats wait inside their action; P4 must accept automatically | ❌ untested | #38 |
+| Owned plots and chests | no mechanic | mod rule (`Ownership`): `claim` / `unclaim`, planting and filling an unowned chest claim it; `look` and `/api/state` show the owner; taking from or harvesting another seat's claim logs a `theft` entry | 🟡 written, smoke `ownership` / `theft` not run yet | #52, #40 |
+| Sleep | `ReadyCheckDialog` waits for every online farmer, P4 included; the game passes each farmer out at 02:00 | `go_to_bed`; `BedtimeWarnTime` reminder and a `status` line; WorldClock's thinking timeout keeps one AI from freezing the others | 🟡 written, smoke `bedtime` not run yet; P4 auto-accept ❌ | #52, #38 |
+| Festival start/end | `ReadyCheckDialog` (`festivalStart`) waits for every online farmer | needs the festival driver | ❌ per-seat rules wait for #11 | #52, #11 |
 
 ## Choice policy
 
