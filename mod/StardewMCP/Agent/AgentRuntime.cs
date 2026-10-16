@@ -86,6 +86,7 @@ public class AgentRuntime
     {
         _globalTicks++;
         AutoHandleOverlays();
+        AgentTools.FishingTick(this); // plays an open fishing minigame while this seat runs the fish tool
         SocialTools.Tick(Log.Player);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);

@@ -18,7 +18,7 @@ Every system behind that handler is then covered without new code.
 | Use button | left-click | `use_tool`, `plant` | `Farmer.BeginUsingTool`, `Utility.tryToPlaceItem` | 🟡 places only on tilled soil |
 | Dialogue answer | click an option | `respond(option)` | `DialogueBox` → `answerDialogueAction` or the question's callback | ✅ |
 | Menu | click, type | `menu`; `shop_list`, `buy`, `close_menu` | the menu's own click and handler methods | 🟡 reader, fallback, `take`/`put`, `choose`, `amount`, `type`, `ok`/`cancel`; `buy`/`sell`/`craft` adapters to come |
-| Minigame | timing | none | `BobberBar`, `IMinigame` | ❌ |
+| Minigame | timing | `fish` (BobberBar only) | `BobberBar`, `IMinigame` | 🟡 fishing only (not yet run in game), other `IMinigame`s ❌ |
 
 Rules:
 
@@ -113,7 +113,7 @@ Rules:
 
 | System | How a human does it | Covered by | Status | Issue |
 |---|---|---|---|---|
-| Fishing | cast, then `BobberBar` | fishing driver | ❌ | #4 |
+| Fishing | cast, then `BobberBar` | `fish(tries)`: shore spot, cast power, bite, BobberBar driver, treasure | 🟡 written, not yet run in game (smoke `fish`); `fish_info` and bait/tackle `attach` still open | #4 |
 | Crab pots | place, then action holding bait | `place`, `interact(holding)` | ❌ | #4 |
 | Mine ladders, shafts | action on a tile | `interact` | ✅ | |
 | Mine elevator | `MineElevator` → `MineElevatorMenu` | `menu choose` | ✅ smoke `mine_elevator` | #2 |

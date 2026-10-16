@@ -16,7 +16,7 @@ namespace StardewMCP.Agent;
 public static class WorldText
 {
     public const string Legend =
-        "@ you | . walkable | , tillable ground | # blocked | ~ water | D door/exit/ladder | A action tile (shop counter, etc) | " +
+        "@ you | . walkable | , tillable ground | # blocked | ~ water (refill the can, fish) | * fish bubbles (cast here: bites come faster) | D door/exit/ladder | A action tile (shop counter, etc) | " +
         "N villager | M monster | H building | b shipping bin | Z your bed | f furniture | O object/machine/chest | W weeds | w twig | S stone | " +
         "L large stump/log/boulder | T tree | t young tree/sapling | s tree stump | Y fruit tree | u bush | g grass | F forage item | " +
         "= tilled soil (empty) | c crop needs water | C crop watered | ! crop ready to harvest | x dead crop";
@@ -41,6 +41,8 @@ public static class WorldText
         var owned = Professions.Owned(p);
         if (owned.Length > 0) sb.AppendLine($"Professions: {owned}");
         sb.AppendLine($"Holding: {(held == null ? "nothing" : $"{held.DisplayName} x{held.Stack}")} (slot {p.CurrentToolIndex})");
+        var fishing = AgentTools.FishingLine();
+        if (fishing.Length > 0) sb.AppendLine(fishing);
         if (p.questLog.Count > 0)
         {
             var quests = p.questLog.Where(q => q != null && !q.completed.Value).Select(q => q.GetName()).Take(4).ToList();
@@ -105,7 +107,7 @@ public static class WorldText
             var it = p.Items[i];
             if (it == null) continue;
             var extra = it is SObject o && o.Edibility > -300 ? $", edible +{o.staminaRecoveredOnConsumption()} energy" : "";
-            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{extra}]");
+            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{extra}{AgentTools.RodNote(it)}]");
         }
         return sb.ToString().TrimEnd();
     }
@@ -215,7 +217,8 @@ public static class WorldText
         var action = loc.doesTileHaveProperty(x, y, "Action", "Buildings");
         if (action != null) return ('A', action);
 
-        if (loc.isWaterTile(x, y)) return ('~', null);
+        if (loc.isWaterTile(x, y))
+            return AgentTools.IsFishSplash(loc, x, y) ? ('*', "Fish bubbles (fish here: bites come faster)") : ('~', null);
 
         if (!Pathfinder.IsWalkable(loc, x, y)) return ('#', null);
 

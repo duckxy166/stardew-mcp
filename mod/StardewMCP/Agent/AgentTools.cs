@@ -230,6 +230,7 @@ public static partial class AgentTools
                 Run = CloseMenu
             },
             MenuTool(),
+            FishTool(),
             new()
             {
                 Name = "travel_to",

@@ -570,6 +570,31 @@ def mine_elevator():
         debug("warp", location="Farm", x=x, y=y)
 
 
+@case("fish")
+def fish():
+    """fish refuses without a rod and late at night; with a rod on the Beach it walks to the shore and casts."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    try:
+        if inventory_count("Bamboo Pole") == 0:
+            good, text = call("fish", tries=1, reason="smoke test")
+            if good or "[no_rod]" not in text:
+                raise Smoke(f"fish without a rod should fail with [no_rod]: {text.splitlines()[0]}")
+            debug("add_item", id="(T)BambooPole", qty=1)
+        ok("travel_to", location="Beach", reason="smoke test")
+        text = ok("fish", tries=2, reason="smoke test")
+        if "Cast 1/2" not in text:
+            raise Smoke(f"fish did not report a first cast:\n{text}")
+        debug("set_time", time=2450)
+        good, text = call("fish", tries=1, reason="smoke test")
+        if good or "[too_late]" not in text:
+            raise Smoke(f"fish after 00:30 should fail with [too_late]: {text.splitlines()[0]}")
+    finally:
+        call("close_menu")
+        debug("set_time", time=900)
+        debug("warp", location="Farm", x=x, y=y)
+
+
 # ---------------------------------------------------------------------- multi-seat (social tools)
 # These need split-screen (SplitScreen: true in config.json) and run last: once p2/p3 have talked to the mod
 # they count as connected AIs, and an idle one holds the world frozen until it is disconnected again.

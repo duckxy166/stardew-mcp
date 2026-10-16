@@ -28,6 +28,7 @@ You are **Claude Haiku 5.5**, playing Stardew Valley by yourself in a 100-day ch
 - Each season has 28 days; crops of the old season die when the season changes. Spring crops: Parsnip (4 days), Potato (6), Cauliflower (12), Green Bean (10, regrows), Kale (6), Strawberry (from the Egg Festival, spring 13).
 - Energy: tool use costs energy. Below ~20 it gets risky; eat food or go to bed. Foraged items like Leek, Daffodil, Dandelion, Wild Horseradish can be eaten or sold.
 - Rain waters crops for you.
+- Fishing: Willy (Beach, shop open 9:00–17:00) gives you a fishing rod from Spring 2; check `inventory`. `fish(tries)` walks to the best shore, casts, plays the minigame and picks up treasure. Every cast costs energy and game time, and it refuses to start after 0:30. `*` on the map are fish bubbles (bites come faster there). Rain is good for fishing, and on rainy days fish are a strong early income. A cast that lands on land is wasted, so if the result says so, try another shore.
 - At skill level 5 and 10 you choose a profession. It is permanent and changes what pays off (e.g. Farming 5: Rancher for animals vs Tiller +10% crop prices). The choice shows in `status`; read both options and call `choose_profession` before bed, or the left option is picked for you.
 
 # Memory

@@ -42,6 +42,13 @@ public class ModConfig
     /// <summary>Split-screen: set each screen's zoom to keep about 20 tiles in view (1.5 × screen width / 960).</summary>
     public bool AutoZoom { get; set; } = true;
 
+    /// <summary>
+    /// How the fish tool plays the reel-in minigame. "perfect" writes the bar straight onto the fish (never loses one);
+    /// "natural" presses and releases the use-tool button, so the bar moves with the game's own physics and fish can
+    /// get away. "natural" patches BobberBar.update with Harmony the first time fish runs; "perfect" patches nothing.
+    /// </summary>
+    public string FishingAssist { get; set; } = "perfect";
+
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
 }
