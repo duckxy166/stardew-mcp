@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","session_id":"synthetic-0001","model":"claude-haiku-5-5","tools":["mcp__stardew__status"]}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_synthetic_1","name":"mcp__stardew__status","input":{"reason":"synthetic"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_synthetic_2","name":"mcp__stardew__look","input":{"reason":"synthetic"}}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_synthetic_3","name":"mcp__stardew__walk_to","input":{"reason":"synthetic"}}]}}
+{"type":"assistant","error":"rate_limit","message":{"role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 3am (Asia/Bangkok)"}]}}
+{"type":"result","subtype":"success","is_error":true,"result":"You've hit your limit · resets 3am (Asia/Bangkok)","num_turns":3,"total_cost_usd":0,"session_id":"synthetic-0001"}

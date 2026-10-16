@@ -113,6 +113,11 @@ The first time the game starts its local co-op server, Windows Firewall may ask 
 
 - `run_days.py` runs one Claude Code session per in-game day, keeps diaries between days and
   backs up the save. Example: `py runner/run_days.py --days 3`
+  If the subscription's usage limit ends a session, the runner waits for the reset (or retries every
+  30 minutes when the time can't be read), shows "รอ usage limit รีเซ็ต (ถึง 03:00)" on the overlay and
+  resumes the same day; that part doesn't count toward `--max-parts`. Logic and options (`--limit-*`,
+  `--max-limit-waits`) are in `runner/usage_limit.py`; check a saved transcript with
+  `py runner/usage_limit.py runs/logs/claude_day_001_part1.jsonl`. Tests: `python -m pytest runner/tests`.
 - `smoke.py` runs LLM-free checks of the tools (farm loop, shop, shipping, sleep) on a copy of your
   save, then reloads your save. `run_days.py` runs it before every batch and stops if a case fails.
   It needs `"EnableDebugApi": true` in `config.json`; see `py runner/smoke.py --list`. The debug

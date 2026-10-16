@@ -31,12 +31,15 @@
   #status .place { font-weight: 400; color: var(--text-2); }
   #status .line2 { display: flex; align-items: center; gap: 10px; font-size: 18px; line-height: 1.4; color: var(--text-2); }
   #status .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--dim); }
+  #runnerLine { color: var(--act); }  /* runner status from POST /api/meta {"runnerStatus": "..."}, e.g. waiting for the usage limit */
+  #runnerLine .dot { background: var(--act); }
 
   /* the game stacks HUD messages ("+1 Parsnip", "Inventory full") up from the bottom-left corner: keep that strip clear */
   #col { position: absolute; left: 24px; top: 134px; bottom: var(--hud-clear); width: 480px; display: flex; flex-direction: column; gap: 16px;
          font-family: "Cascadia Mono", "Cascadia Code", Consolas, "Mitr", monospace; }
   #col > .panel { flex-shrink: 0; }
   body.npc #col { bottom: auto; }
+  body.runner #col { top: 166px; }  /* the status panel has one extra line while the runner posts a status */
 
   #logPanel { font-size: 19px; line-height: 1.5; }
   #logPanel .label { margin-bottom: 8px; }
@@ -105,6 +108,7 @@
       <span class="place" id="place">–</span>
     </div>
     <div class="line2"><span class="dot" id="modeDot"></span><span id="modeText">รอเกม…</span></div>
+    <div class="line2 hide" id="runnerLine"><span class="dot"></span><span id="runnerText"></span></div>
   </div>
 
   <div id="col">
@@ -360,6 +364,10 @@ async function poll() {
     const s = d.state || {};
     meta = d.meta || {};
     if (meta.model) modelShort = meta.model.replace(/^Claude\s+/i, "").trim();
+    const runnerStatus = (meta.runnerStatus || "").trim();   // set by the runner (e.g. usage-limit wait); "" clears it
+    $("runnerText").textContent = runnerStatus;
+    $("runnerLine").classList.toggle("hide", !runnerStatus);
+    document.body.classList.toggle("runner", !!runnerStatus);
     for (const e of d.entries || []) onEntry(e, s);
     booted = true;
 
@@ -427,7 +435,9 @@ async function fetchFeed(after) {
     Object.assign(mockState, patch);
     mockLog.push({ seq: mockLog.length + 1, day: mockState.day, money: mockState.money, ...entry });
   }
-  return { state: mockState, meta: { model: "Claude Haiku 5.5", modelId: "claude-haiku-5-5", session: "mock0000", run: "mock" }, entries: mockLog.filter(e => e.seq > after) };
+  const mockMeta = { model: "Claude Haiku 5.5", modelId: "claude-haiku-5-5", session: "mock0000", run: "mock" };
+  if (new URLSearchParams(location.search).has("mockwait")) mockMeta.runnerStatus = "รอ usage limit รีเซ็ต (ถึง 03:00)";  // ?mock=1&mockwait=1
+  return { state: mockState, meta: mockMeta, entries: mockLog.filter(e => e.seq > after) };
 }
 async function fetchDay(n) {
   try {
