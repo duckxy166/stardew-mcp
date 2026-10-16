@@ -152,16 +152,16 @@ public static class SocialTools
 
     private static string Me => AgentTools.Rt.Log.Player;
 
-    private static string? NameOf(PlayerSlot s) => (s.State as ScreenState)?.Name;
+    internal static string? NameOf(PlayerSlot s) => (s.State as ScreenState)?.Name;
 
     /// <summary>"Gemini (p2)": how players refer to each other.</summary>
-    private static string Label(PlayerSlot s) => $"{NameOf(s) ?? "?"} ({s.Id})";
+    internal static string Label(PlayerSlot s) => $"{NameOf(s) ?? "?"} ({s.Id})";
 
     private static IEnumerable<PlayerSlot> OtherAis() =>
         Players.Slots.Where(s => s.Role == SeatRole.Ai && s.Id != Me && s.Active && NameOf(s) != null);
 
     /// <summary>The AI seat named by <paramref name="to"/> (id or name); otherwise fails <paramref name="c"/> with the valid choices.</summary>
-    private static PlayerSlot? Target(string to, CallContext c)
+    internal static PlayerSlot? Target(string to, CallContext c)
     {
         to = to.Trim();
         var seat = OtherAis().FirstOrDefault(s => s.Id.Equals(to, StringComparison.OrdinalIgnoreCase) ||
@@ -182,6 +182,13 @@ public static class SocialTools
         var q = Inbox.GetOrAdd(to.Id, _ => new());
         q.Enqueue(line);
         while (q.Count > MaxInbox) q.TryDequeue(out _);
+    }
+
+    /// <summary>Put a line in another seat's inbox (it rides on that seat's next tool result), e.g. a marriage proposal (#53).</summary>
+    internal static void Notify(string player, string line)
+    {
+        var slot = Players.ById(player);
+        if (slot != null) Deliver(slot, line);
     }
 
     /// <summary>Messages for this seat since its last tool result, as a compact block ("" when none).</summary>

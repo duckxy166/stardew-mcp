@@ -118,7 +118,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(VillagerTools()).Concat(Core()));
+        return new List<ToolDef>(SocialTools.All().Concat(VillagerTools()).Concat(RomanceTools()).Concat(NamingTools()).Concat(Core()));
     }
 
     private static List<ToolDef> Core()
@@ -1104,6 +1104,7 @@ public static partial class AgentTools
         int moneyBefore = P.Money;
         Rt.Log.WriteDiary(AgentLog.FarmDay, diary);
         Professions.ResolveDefaults(Rt, P, "not chosen before bed");
+        Naming.ResolveDefaults(Rt, "not named before bed");
 
         if (Loc is not FarmHouse)
         {
@@ -1139,6 +1140,9 @@ public static partial class AgentTools
                         lm.okButtonClicked();
                     break;
             }
+            // A question or a naming box in the night (a child): hand it to the AI instead of waiting on it (#53).
+            if (t > 30 && (Romance.NightQuestion(c, Rt, t) || Naming.NightPrompt(c)))
+                yield break;
             if (Game1.Date.TotalDays > dayBefore && Context.IsWorldReady && Game1.activeClickableMenu == null && !Game1.fadeToBlack && !Game1.newDay && P.CanMove)
                 break;
             yield return null;

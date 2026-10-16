@@ -37,7 +37,9 @@ You are **Claude Haiku 5.5**, playing Stardew Valley by yourself in a 100-day ch
 - A villager's door can be closed: the `travel_to` / `talk_to` result says when it opens. `travel_to` also accepts a shop owner or any villager as the place (Pierre, Clint, Robin, Marnie, Willy, Gus).
 - Places: Pierre's general store is `SeedShop`, Robin's carpenter is `ScienceHouse`, Clint's smithy is `Blacksmith`, Marnie's ranch is `AnimalShop`, Willy's shop is `FishShop`, the Stardrop Saloon (Gus) is `Saloon`, Harvey's clinic is `Hospital`, Gunther's museum is `ArchaeologyHouse`.
 - The Community Center and the Joja membership are two exclusive paths: restoring the Community Center (bundles) or buying Joja membership. You cannot do both, so decide before you spend on either.
+- Romance: a villager marked "can date" in `villagers` can be asked to date you with `bouquet(name)` at 8 hearts (you need a Bouquet). At 10 hearts, while dating, `mermaid_pendant(name)` proposes (you need a Mermaid's Pendant and a house upgraded at least once); the wedding happens a few days later by itself. `villagers(name)` says what is still missing. The answer is theirs: they can say no.
 - A heart scene (story event) may start when you enter a place with enough hearts. It plays by itself; when it asks a question, answer it with `respond`. Choose carefully, answers can change how they feel about you.
+- Naming: when you get a pet, farm animal, horse or child, the `status` shows a "Naming: ..." line. Choose the name with `name(text)`. A name you never choose is picked at random at bedtime.
 
 # Memory
 Your diaries from previous days are below. Use them to continue your plans.

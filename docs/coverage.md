@@ -100,9 +100,9 @@ Rules:
 | Talk | action on an NPC | `talk_to` (finds the villager, travels across maps, reports points before/after) | 🟡 untested in game | #9 |
 | Gifts | action holding the gift | `talk_to(gift_item)`: reaction and taste are learned; `interact(holding)` gifts are not recorded | 🟡 untested in game | #9 |
 | Heart events | cutscenes with questions | `PlayHeartEvents` (off): story events play, stop at questions for `respond`; other events are skipped | 🟡 opt-in, untested; in split-screen the event only moves while no other AI is thinking | #9 |
-| Dating, marriage | give a bouquet, later a Mermaid Pendant | `talk_to(gift_item)` | 🟡 untested | |
-| Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
-| Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
+| Dating, marriage | give a bouquet (8 hearts), later a Mermaid Pendant (10 hearts, upgraded house) | `bouquet`, `mermaid_pendant` (the game's gift path through `talk_to`; requirements shown in `villagers`); the wedding is the game's own, watched and logged | 🟡 untested in game | #53 |
+| Children | night question (`DialogueBox`), then `NamingMenu` | `go_to_bed` hands the question back; `respond` answers it, `name` names the child | 🟡 untested in game; the AI is not forced to want a child | #53 |
+| Naming pets, animals, horse | `NamingMenu` | `name(text)`; status shows "Naming: ..."; an unanswered box gets a random name at bedtime or at 1:00 AM | 🟡 untested in game | #53 |
 | Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
@@ -134,7 +134,8 @@ Use the game's multiplayer features first. Add mod rules only where the game has
 | Send money | ledger → `SendMoney` → recipient → `DigitEntryMenu`; chat shows "X sent Y" | `interact` + `respond` + `menu amount` | ✅ smoke `send_money` (split-screen) | |
 | Loans, debts | no mechanic | a promise on the plan board, paid with Send money | story | #39, #48 |
 | Give an item to a player | action holding the item → `SendProposal(Gift)`: one item, the receiver may decline | `give` (PR #50 moves the stack directly, no decline) | ✅ different path | #39 |
-| Marriage, dance, baby between players | `SendProposal(Marriage/Dance/Baby)` → `PendingProposalDialog` | `interact(holding)` + `menu choose` | ❌ | |
+| Marriage between players | `SendProposal(Marriage)` → `PendingProposalDialog` | `propose(to)` and `answer_proposal(accept)`; the other player is told in their next tool result | 🟡 untested in game | #53 |
+| Dance, baby between players | `SendProposal(Dance/Baby)` → `PendingProposalDialog` | `interact(holding)` + `menu choose` | ❌ | |
 | Owned plots and chests | no mechanic | mod rule: a cabin and its chests belong to its owner; plots on the plan board | ❌ | #40 |
 | Sleep, festival start/end | `ReadyCheckDialog` waits for every online farmer, P4 included | AI seats wait inside their action; P4 must accept automatically | ❌ untested | #38 |
 
@@ -146,9 +147,9 @@ What `AgentRuntime.AutoHandleOverlays` does with screens that appear by themselv
 |---|---|---|
 | `ShippingMenu`, `LevelUpMenu` with no choice | clicks OK | keep |
 | `LevelUpMenu` profession | picks the left one | the AI chooses (#8, PR #47) |
-| `NamingMenu` | random name | the AI types a name |
+| `NamingMenu` | the AI answers with `name(text)`; a box nobody answers gets a random name at bedtime, at 1:00 AM, with no AI on the seat, or after the thinking timeout plus a minute | keep |
 | Question in a cutscene | skips the event, then answers option 0; with `PlayHeartEvents`, heart events wait for `respond` (option 0 after the think timeout) | the AI answers with `respond` for every event |
-| `PendingProposalDialog` | not handled | the AI accepts or declines |
+| `PendingProposalDialog` | the AI accepts or declines with `answer_proposal`; nothing answers for it | keep |
 | `ReadyCheckDialog` | not handled | AI seats wait; P4 accepts automatically |
 | Any other menu | "Menu open: X"; `menu` lists its labelled buttons (`click`, `ok`, `cancel`) | keep |
 

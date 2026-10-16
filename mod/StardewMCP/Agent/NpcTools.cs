@@ -32,6 +32,8 @@ internal class VillagerInfo
     public int BirthdayDay { get; set; }
     /// <summary>0 = today; -1 = unknown.</summary>
     public int DaysToBirthday { get; set; } = -1;
+    /// <summary>Can be dated and married (#53).</summary>
+    public bool Datable { get; set; }
 }
 
 /// <summary>
@@ -97,7 +99,8 @@ internal static class NpcInfo
             X = npc.TilePoint.X,
             Y = npc.TilePoint.Y,
             BirthdaySeason = (Convert.ToString(npc.Birthday_Season) ?? "").Trim().ToLowerInvariant(),
-            BirthdayDay = Convert.ToInt32(npc.Birthday_Day)
+            BirthdayDay = Convert.ToInt32(npc.Birthday_Day),
+            Datable = npc.datable.Value
         };
         info.DaysToBirthday = DaysToBirthday(info.BirthdaySeason, info.BirthdayDay);
         if (who.friendshipData.TryGetValue(npc.Name, out var f))
@@ -175,7 +178,7 @@ internal static class NpcInfo
     {
         var status = v.Status.Length > 0 && v.Status != "friendly" ? $" | {v.Status}" : "";
         return $"{v.DisplayName}: {v.Location} ({v.X},{v.Y}) | {v.Hearts} hearts ({v.Points} pts) | talked today: {(v.TalkedToToday ? "yes" : "no")}" +
-               $" | gifts {v.GiftsToday} today, {v.GiftsThisWeek} this week | {BirthdayText(v)}{status}";
+               $" | gifts {v.GiftsToday} today, {v.GiftsThisWeek} this week | {BirthdayText(v)}{status}{Romance.Brief(v)}";
     }
 
     public static string Roster(Farmer who)
@@ -184,12 +187,16 @@ internal static class NpcInfo
         var sb = new StringBuilder();
         sb.AppendLine($"Villagers on farm day {AgentLog.FarmDay} ({Game1.currentSeason} {Game1.dayOfMonth}, {Game1.shortDayNameFromDayOfSeason(Game1.dayOfMonth)}). " +
                       "250 points = 1 heart. Talking: +20 points, once a day. Gifts: at most 1 per day and 2 per week per villager; a birthday gift counts 8x.");
+        var relationships = Romance.SelfLine(who);
+        if (relationships.Length > 0) sb.AppendLine(relationships);
         foreach (var met in infos.Where(i => i.Met))
             sb.AppendLine(Line(met));
         var unmet = infos.Where(i => !i.Met).ToList();
         if (unmet.Count > 0)
             sb.AppendLine("Not met yet (talk_to introduces you): " + string.Join(", ", unmet.Select(i => $"{i.DisplayName} ({i.Location} {i.X},{i.Y})")));
-        sb.Append("villagers(name) shows one villager's gift tastes; talk_to(name) finds them and talks.");
+        sb.AppendLine("Romance: villagers marked \"can date\" can be dated and married. bouquet(name) at 8+ hearts starts dating, mermaid_pendant(name) at 10+ hearts proposes " +
+                      "(it needs an upgraded house). propose(to) asks another player to marry you.");
+        sb.Append("villagers(name) shows one villager's gift tastes and what dating or marriage still needs; talk_to(name) finds them and talks.");
         return sb.ToString();
     }
 
@@ -201,6 +208,7 @@ internal static class NpcInfo
         var sb = new StringBuilder();
         sb.AppendLine(Line(v));
         if (!v.Met) sb.AppendLine("You have not met them yet: talk_to introduces you.");
+        sb.AppendLine(Romance.Requirements(who, npc, v));
 
         if (book.LastGift.TryGetValue(npc.Name, out var last))
             sb.AppendLine($"Your last gift to them: {ItemName(last.ItemId)} on farm day {last.Day}; they {TasteVerb(last.Taste)} it ({Signed(last.Points)} points).");
@@ -314,8 +322,8 @@ public static partial class AgentTools
         {
             Name = "villagers",
             Description = "Everyone you can befriend: where they are right now (map and tile), hearts and friendship points, whether you already talked to them today, " +
-                          "gifts given today and this week (max 1 per day and 2 per week), birthday (flagged when it is today or within 3 days) and whether you are dating or married. " +
-                          "With name: also your last gift to them, what you found out about their tastes and what they would make of the items you carry. " +
+                          "gifts given today and this week (max 1 per day and 2 per week), birthday (flagged when it is today or within 3 days), whether you can date them and whether you are dating or married. " +
+                          "With name: also what dating or marriage still needs, your last gift to them, what you found out about their tastes and what they would make of the items you carry. " +
                           "Tastes are discovered by giving gifts, nobody knows them from the start. Costs no game time.",
             Schema = Obj(new { name = Str("Optional villager name for details, e.g. Abigail") }),
             Instant = true, AppendStatus = false,
@@ -388,6 +396,8 @@ public static partial class AgentTools
                 ? $"You already talked to {npc.displayName} today: talking gives friendship once a day. Give a gift (gift_item) or come back tomorrow."
                 : null;
         }
+        // A bouquet or Mermaid's Pendant is not an ordinary gift (#53): the game decides whether it is accepted today.
+        if (gift is SObject special && NpcInfo.SpecialGifts.Contains(special.Name)) return null;
         if (f.GiftsToday >= 1)
             return $"You already gave {npc.displayName} a gift today (limit 1 per day). Try again tomorrow.";
         // Birthdays and spouses are exempt from the weekly limit in the vanilla game, so the game decides those.
@@ -429,6 +439,7 @@ public static partial class AgentTools
         string failure = "";
         var before = (Points: 0, Talked: false, GiftsToday: 0);
         int tasteCode = -1;
+        int stackBefore = giftItem?.Stack ?? 0;
         bool birthdayToday = false;
 
         // Find them (they walk around, so look them up again after every trip or failed approach), go to them, talk.
@@ -500,7 +511,9 @@ public static partial class AgentTools
         bool accepted = false;
         if (giftItem != null)
         {
-            accepted = after.GiftsToday > before.GiftsToday || delta != 0;
+            // A bouquet or pendant may change neither the points nor the gift counter: the item leaving the pack counts too.
+            bool taken = giftSlot >= P.Items.Count || !ReferenceEquals(P.Items[giftSlot], giftItem) || giftItem.Stack < stackBefore;
+            accepted = after.GiftsToday > before.GiftsToday || delta != 0 || taken;
             var itemName = giftItem.DisplayName;
             if (!accepted)
                 sb.Append($" The gift ({itemName}) was not accepted.");

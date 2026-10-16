@@ -88,8 +88,13 @@ public static class WorldText
                 var letterText = letter.mailMessage != null ? string.Join(" ", letter.mailMessage).Replace("\n", " ").Replace("^", " ") : "";
                 sb.AppendLine($"Letter open: \"{letterText}\". Use close_menu (attached items and quests will be claimed automatically).");
                 break;
+            case NamingMenu nm:
+                sb.AppendLine(Naming.StatusLine(nm));
+                break;
             default:
-                sb.AppendLine($"Menu open: {AgentTools.MenuName(Game1.activeClickableMenu)}. Use menu() to read and use it, or close_menu.");
+                // A Yes/No or proposal box (#53) has its own tool; any other menu is read with menu().
+                sb.AppendLine(Romance.MenuLine(Game1.activeClickableMenu) ??
+                              $"Menu open: {AgentTools.MenuName(Game1.activeClickableMenu)}. Use menu() to read and use it, or close_menu.");
                 break;
         }
         return sb.ToString();

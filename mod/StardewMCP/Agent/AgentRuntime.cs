@@ -91,6 +91,7 @@ public class AgentRuntime
         AutoHandleOverlays();
         SocialTools.Tick(Log.Player);
         Story.Tick(this);
+        Romance.Tick(this);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);
     }
@@ -114,10 +115,8 @@ public class AgentRuntime
                         lm.okButtonClicked();
                     break;
                 case StardewValley.Menus.NamingMenu nm:
-                    var name = string.IsNullOrWhiteSpace(nm.textBox?.Text) ? StardewValley.Dialogue.randomName() : nm.textBox.Text;
-                    Log.Add("system", text: $"Auto-named \"{name}\" in NamingMenu");
-                    nm.doneNaming?.Invoke(name);
-                    if (Game1.activeClickableMenu == nm) Game1.exitActiveMenu();
+                    // Not named here any more (#53): the AI chooses with name(text); NamingTools.cs has the fallbacks.
+                    Naming.Observe(this, nm);
                     break;
             }
         }
