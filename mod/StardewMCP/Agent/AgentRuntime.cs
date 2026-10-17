@@ -10,19 +10,6 @@ using StardewValley;
 
 namespace StardewMCP.Agent;
 
-/// <summary>State shared by one running tool call.</summary>
-public class CallContext
-{
-    public string Result = "";
-    public bool Ok = true;
-
-    public void Fail(string message)
-    {
-        Ok = false;
-        Result = message;
-    }
-}
-
 /// <summary>A tool call waiting for (or running on) the game thread.</summary>
 public class PendingCall
 {

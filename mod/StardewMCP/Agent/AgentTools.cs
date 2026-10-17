@@ -18,24 +18,6 @@ using SObject = StardewValley.Object;
 
 namespace StardewMCP.Agent;
 
-public delegate IEnumerator ToolRunner(JsonElement args, CallContext ctx);
-
-public class ToolDef
-{
-    public string Name = null!;
-    public string Description = null!;
-    public object Schema = null!;
-    public ToolRunner Run = null!;
-    /// <summary>Instant tools (observations, thinking) do not unfreeze game time.</summary>
-    public bool Instant;
-    /// <summary>Instant for these arguments only, e.g. menu() reads while menu(action) acts.</summary>
-    public Func<JsonElement, bool>? InstantFor;
-    public bool NeedsWorld = true;
-    public bool AppendStatus = true;
-    /// <summary>Chat and whispers waiting for the player are appended to this tool's result (false for debug ops).</summary>
-    public bool Mail = true;
-}
-
 /// <summary>The actions the AI can take. Mechanics (walking, aiming, button presses) are automated; decisions are the AI's.</summary>
 public static partial class AgentTools
 {
@@ -49,15 +31,7 @@ public static partial class AgentTools
 
     // ------------------------------------------------------------------ schema helpers
 
-    internal static object Str(string desc) => new { type = "string", description = desc };
-    internal static object Int(string desc) => new { type = "integer", description = desc };
-    private static object Tiles(string desc) => new
-    {
-        type = "array",
-        description = desc,
-        items = new { type = "array", items = new { type = "integer" }, minItems = 2, maxItems = 2 }
-    };
-    internal static object Obj(object props, params string[] required) => new { type = "object", properties = props, required };
+    // Str, Int, Tiles, Obj (schema) and Reason, ArgsForLog, S, I, Has, TileList (arguments) are in ToolArgs.cs.
 
     /// <summary>Language for text shown to viewers (config ThoughtLanguage).</summary>
     private static string Lang =>
@@ -66,37 +40,6 @@ public static partial class AgentTools
     private static string ReasonDesc => Lang.Equals("Thai", StringComparison.OrdinalIgnoreCase)
         ? "Short reason IN THAI shown to viewers on screen (e.g. \"ถางหญ้าเพื่อเตรียมแปลงปลูก\")"
         : $"Short reason IN {Lang.ToUpperInvariant()} shown to viewers on screen";
-
-    public static string Reason(JsonElement args) =>
-        args.ValueKind == JsonValueKind.Object && args.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() ?? "" : "";
-
-    public static object? ArgsForLog(JsonElement args)
-    {
-        if (args.ValueKind != JsonValueKind.Object) return null;
-        var d = new Dictionary<string, JsonElement>();
-        foreach (var p in args.EnumerateObject())
-            if (p.Name != "reason") d[p.Name] = p.Value.Clone();
-        return d.Count > 0 ? d : null;
-    }
-
-    internal static string S(JsonElement a, string name, string def = "") =>
-        a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? def : def;
-
-    internal static int I(JsonElement a, string name, int def) =>
-        a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : def;
-
-    private static bool Has(JsonElement a, string name) =>
-        a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null;
-
-    private static List<Point> TileList(JsonElement a, string name)
-    {
-        var list = new List<Point>();
-        if (a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var arr) && arr.ValueKind == JsonValueKind.Array)
-            foreach (var t in arr.EnumerateArray())
-                if (t.ValueKind == JsonValueKind.Array && t.GetArrayLength() >= 2)
-                    list.Add(new Point(t[0].GetInt32(), t[1].GetInt32()));
-        return list;
-    }
 
     private static string StatusText()
     {

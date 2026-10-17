@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Game-free unit tests. This project must NOT reference ../StardewMCP/StardewMCP.csproj: that one needs
+    the Stardew Valley and SMAPI assemblies (Pathoschild.Stardew.ModBuildConfig finds them in your game
+    folder), which CI and most dev machines don't have. Instead the files of the mod that use no game types
+    are compiled straight into this project below. Anything that needs Game1, GameLocation, Farmer and the
+    like can't be tested here; move the logic into a game-free file and link that file.
+
+    Run:  dotnet test mod/StardewMCP.Tests
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <RootNamespace>StardewMCP.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The mod targets net6.0 like the game; let the tests run on a newer installed runtime too. -->
+    <RollForward>Major</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.6.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4" />
+  </ItemGroup>
+
+  <!-- Mod sources without game types -->
+  <ItemGroup>
+    <Compile Include="..\StardewMCP\PathSearch.cs" Link="Mod\PathSearch.cs" />
+    <Compile Include="..\StardewMCP\Agent\ToolDef.cs" Link="Mod\ToolDef.cs" />
+    <Compile Include="..\StardewMCP\Agent\ToolArgs.cs" Link="Mod\ToolArgs.cs" />
+    <Compile Include="..\StardewMCP\Agent\ToolContract.cs" Link="Mod\ToolContract.cs" />
+    <Compile Include="..\StardewMCP\Agent\McpDispatcher.cs" Link="Mod\McpDispatcher.cs" />
+    <Compile Include="..\StardewMCP\Agent\WorldText.Format.cs" Link="Mod\WorldText.Format.cs" />
+  </ItemGroup>
+
+</Project>

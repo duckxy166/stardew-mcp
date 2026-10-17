@@ -146,6 +146,37 @@ dotnet build -c Release                                    # builds, deploys to 
 dotnet build -p:EnableModDeploy=false -p:EnableModZip=false   # compile check only
 ```
 
+## Tests
+
+The mod build needs the game's DLLs (ModBuildConfig), so CI and the test projects never build it.
+
+```
+dotnet test mod/StardewMCP.Tests                                  # C# xUnit, game-free
+pip install pytest && python -m pytest -q runner/tests studio     # Python
+```
+
+```
+mod/StardewMCP.Tests/  Does NOT reference the mod project; compiles the game-free mod files below via
+                       <Compile Include Link> and shims Point/Vector2 (Shims/XnaTypes.cs)
+runner/tests/          pytest: run_days.py stream parsing / diaries / day rollover, tool schemas read from the C# source
+runner/samples/        Synthetic claude stream-json transcripts, game logs and diaries used by those tests
+```
+
+Game-free mod files (no `Game1`, `GameLocation`, `Farmer`; linked into the tests):
+
+```
+mod/StardewMCP/PathSearch.cs         A* over IWalkableGrid (Pathfinder.cs supplies the game's collision check)
+mod/StardewMCP/Agent/ToolDef.cs      ToolDef, CallContext, ToolRunner
+mod/StardewMCP/Agent/ToolArgs.cs     Schema and argument helpers (Obj, Str, Int, Tiles, S, I, TileList), part of AgentTools
+mod/StardewMCP/Agent/ToolContract.cs Rules for tools/list (valid schema, required in properties, reason on actions); logged at startup
+mod/StardewMCP/Agent/McpDispatcher.cs JSON-RPC handling over IMcpSeat; McpSeat.cs adapts a real seat for AgentHttp
+mod/StardewMCP/Agent/WorldText.Format.cs  FormatTime, DirName, part of WorldText
+```
+
+New logic that can run without the game goes into such a file with a test; keep moves small and leave a
+forwarder behind. A tool's `reason`, snake_case name and `required` list are checked by `ToolContract` and
+`runner/tests/test_tool_sources.py`.
+
 ## Rules
 
 - Keep everything original: don't copy code from other mods or repos unless their license

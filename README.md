@@ -144,6 +144,17 @@ dotnet build -c Release
 [ModBuildConfig](https://www.nuget.org/packages/Pathoschild.Stardew.ModBuildConfig) finds your
 game folder, copies the mod into `Mods/` and creates a release zip in `bin/`.
 
+### Tests
+
+Tests that don't need the game (the mod build does, because ModBuildConfig references its DLLs):
+
+```bash
+dotnet test mod/StardewMCP.Tests                                  # C#: pathfinding, tool schemas, MCP requests
+pip install pytest && python -m pytest -q runner/tests studio     # Python: runner and studio
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md#tests) for what they cover.
+
 ## Contributing
 
 Pull requests and issues are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).

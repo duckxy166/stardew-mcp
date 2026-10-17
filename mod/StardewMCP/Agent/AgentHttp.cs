@@ -34,7 +34,7 @@ public class AgentHttp
     private readonly Dictionary<string, ToolDef> _tools;
     private readonly Dictionary<string, ToolDef> _debug = DebugApi.All();
     private HttpListener? _listener;
-    private const string ProtocolFallback = "2025-06-18";
+    private readonly McpDispatcher _mcp; // JSON-RPC handling, see McpDispatcher.cs
 
     // Snapshot of game state for the overlay, refreshed on the game thread.
     public volatile string StateJson = "{}";
@@ -46,6 +46,9 @@ public class AgentHttp
         _monitor = monitor;
         _assetDir = assetDir;
         _tools = AgentTools.All().ToDictionary(t => t.Name);
+        _mcp = new McpDispatcher(_tools, _config.SplitScreen);
+        foreach (var problem in ToolContract.Check(_tools.Values))
+            _monitor.Log("Tool contract: " + problem, LogLevel.Warn);
     }
 
     public void Start(int port)
@@ -283,69 +286,11 @@ public class AgentHttp
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
 
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            var outs = new List<object>();
-            foreach (var m in root.EnumerateArray())
-            {
-                var o = await Dispatch(m, seat);
-                if (o != null) outs.Add(o);
-            }
-            if (outs.Count == 0) { res.StatusCode = 202; res.Close(); return; }
-            await Json(res, outs);
-            return;
-        }
-
-        var reply = await Dispatch(root, seat);
-        if (reply == null) { res.StatusCode = 202; res.Close(); return; }
-        res.Headers["Mcp-Session-Id"] = "stardew-" + seat.Id;
-        await Json(res, reply);
+        var reply = await _mcp.Handle(root, new McpSeat(seat));
+        if (reply.Body == null) { res.StatusCode = reply.Status; res.Close(); return; }
+        if (reply.SessionId != null) res.Headers["Mcp-Session-Id"] = reply.SessionId;
+        await Json(res, reply.Body);
     }
-
-    private async Task<object?> Dispatch(JsonElement msg, PlayerSlot seat)
-    {
-        // Any MCP traffic means an AI is attached to this seat: from now on its thinking freezes the world.
-        seat.MarkContact();
-        var method = msg.TryGetProperty("method", out var m) ? m.GetString() ?? "" : "";
-        if (!msg.TryGetProperty("id", out var idEl)) return null; // notification
-        object id = idEl.ValueKind == JsonValueKind.Number ? idEl.GetInt64() : (object)(idEl.GetString() ?? "");
-        var p = msg.TryGetProperty("params", out var pe) ? pe : default;
-
-        switch (method)
-        {
-            case "initialize":
-                var ver = p.ValueKind == JsonValueKind.Object && p.TryGetProperty("protocolVersion", out var pv) ? pv.GetString() : ProtocolFallback;
-                return Ok(id, new
-                {
-                    protocolVersion = ver ?? ProtocolFallback,
-                    capabilities = new { tools = new { listChanged = false } },
-                    serverInfo = new { name = "stardew", version = "2.0.0" },
-                    instructions = _config.SplitScreen
-                        ? $"You are player {seat.Id} on a three-player Stardew Valley farm. The whole world is frozen while you or another player is thinking, and only moves while actions run."
-                        : "You are playing Stardew Valley. Game time is frozen while you think and only moves while an action runs."
-                });
-            case "ping":
-                return Ok(id, new { });
-            case "tools/list":
-                return Ok(id, new
-                {
-                    tools = _tools.Values.Select(t => new { name = t.Name, description = t.Description, inputSchema = t.Schema })
-                });
-            case "tools/call":
-                var name = p.GetProperty("name").GetString() ?? "";
-                var args = p.TryGetProperty("arguments", out var a) ? a.Clone() : JsonDocument.Parse("{}").RootElement;
-                if (!_tools.TryGetValue(name, out var tool))
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Unknown tool {name}" } }, isError = true });
-                if (!seat.Active)
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Player {seat.Id} is not in the game yet (title screen, loading or still joining). Wait and try again." } }, isError = true });
-                var (ok, text) = await seat.Runtime.Enqueue(tool, args, observation: true);
-                return Ok(id, new { content = new[] { new { type = "text", text } }, isError = !ok });
-            default:
-                return new { jsonrpc = "2.0", id, error = new { code = -32601, message = $"Method not found: {method}" } };
-        }
-    }
-
-    private static object Ok(object id, object result) => new { jsonrpc = "2.0", id, result };
 
     // ------------------------------------------------------------------ helpers
 

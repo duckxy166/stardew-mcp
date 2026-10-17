@@ -13,7 +13,7 @@ using SObject = StardewValley.Object;
 namespace StardewMCP.Agent;
 
 /// <summary>Compact, LLM-friendly text views of the game world.</summary>
-public static class WorldText
+public static partial class WorldText
 {
     public const string Legend =
         "@ you | . walkable | , tillable ground | # blocked | ~ water | D door/exit/ladder | A action tile (shop counter, etc) | " +
@@ -21,13 +21,7 @@ public static class WorldText
         "L large stump/log/boulder | T tree | t young tree/sapling | s tree stump | Y fruit tree | u bush | g grass | F forage item | " +
         "= tilled soil (empty) | c crop needs water | C crop watered | ! crop ready to harvest | x dead crop";
 
-    public static string FormatTime(int t)
-    {
-        int h = t / 100, m = t % 100;
-        return $"{h:00}:{m:00}";
-    }
-
-    public static string DirName(int d) => d switch { 0 => "up", 1 => "right", 2 => "down", 3 => "left", _ => "?" };
+    // FormatTime and DirName are in WorldText.Format.cs (no game types, compiled by the unit tests).
 
     public static string Status()
     {

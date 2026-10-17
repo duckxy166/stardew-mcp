@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/work/runs/workdir","session_id":"sample-session-0004","tools":["mcp__stardew__think","mcp__stardew__status","mcp__stardew__look","mcp__stardew__walk_to","mcp__stardew__use_tool","mcp__stardew__go_to_bed"],"mcp_servers":[{"name":"stardew","status":"connected"}],"model":"sample-model","permissionMode":"default"}
+{"type":"result","subtype":"success","is_error":true,"num_turns":1,"result":"Invalid API key · Please run /login","session_id":"sample-session-0004","total_cost_usd":0}
