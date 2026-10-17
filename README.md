@@ -52,6 +52,8 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `think` | Post a thought (shown on the overlay, costs no game time) |
 | `walk_to`, `travel_to` | Pathfind to a tile, or to another location |
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
+| `fight` | Fight the monsters near you: equips the best weapon, walks to the nearest one and swings for a few seconds; stops when all clear, health is at 30% of max (at least 15) or a menu opens; `eat_below` (HP %) eats the best healing food on the way |
+| `leave_mine` | Get out of the Mines from any floor: climbs the up ladders, or warps to the Mine entrance when health is low, it is 11 PM or the ladder cannot be reached. In the mines the footer shows HP, and any other long action is cut short with `Interrupted:` when a monster within 3 tiles hurts you |
 | `interact`, `talk_to`, `respond`, `close_menu` | Objects, villagers, dialogue and menus; `interact` can hold an item first (load a machine, use a totem) |
 | `menu` | Read any open menu, then use it: take/put (chests), choose (mine elevator), amount (send money), type (names), ok/cancel, or click a listed button |
 | `shop_list`, `buy`, `ship`, `eat` | Shopping, shipping bin, food |
@@ -69,6 +71,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `http://localhost:8770/api/state` | Raw game state JSON. After a day that ended without `go_to_bed` (2:00 AM, health 0), `passOut` says why and `pendingJournalDay` is the day whose journal is still owed until `journal(day=N)` is written |
 | `http://localhost:8770/api/memory` | Each AI seat's lessons, plan and notes (what `journal` wrote) |
 | `POST http://localhost:8770/api/release_freeze` | Runner only: stop an idle seat from freezing the world (`{"seat": "p1"}`, or `"all"`; `"on": false` takes it back) so game time runs until the farmer passes out. Ends with the farm day |
+| `http://localhost:8770/api/briefing?seat=p1` | Morning briefing of one AI seat: overnight results, shipping by item, mail, weather, farm (the runner puts it in the first prompt of a day) |
 
 ## Configuration
 

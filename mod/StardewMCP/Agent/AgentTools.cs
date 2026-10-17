@@ -106,11 +106,14 @@ public static partial class AgentTools
 
     public static string Footer()
     {
-        var sb = new StringBuilder($"[{WorldText.FormatTime(Game1.timeOfDay)} · {Loc?.Name} ({P.TilePoint.X},{P.TilePoint.Y}) · energy {(int)P.Stamina}/{P.MaxStamina} · {P.Money}g]");
+        var sb = new StringBuilder($"[{WorldText.FormatTime(Game1.timeOfDay)} · {Loc?.Name} ({P.TilePoint.X},{P.TilePoint.Y}) · energy {(int)P.Stamina}/{P.MaxStamina}{MineHealthFooter()} · {P.Money}g]");
+        sb.Append(MineLateWarning());
         var menu = WorldText.MenuState().Trim();
         if (menu.Length > 0) sb.Append('\n').Append(menu);
         var prof = Professions.PendingText(Rt, P);
         if (prof.Length > 0) sb.Append('\n').Append(prof);
+        var mail = Briefing.MailHint();
+        if (mail.Length > 0) sb.Append('\n').Append(mail);
         return sb.ToString();
     }
 
@@ -179,6 +182,8 @@ public static partial class AgentTools
                 }, "tool", "tiles", "reason"),
                 Run = UseTool
             },
+            CombatTool(),
+            LeaveMineTool(),
             new()
             {
                 Name = "plant",
@@ -1084,12 +1089,18 @@ public static partial class AgentTools
         yield return WaitIdle();
         var before = (int)P.Stamina;
         var itemName = P.Items[slot].DisplayName;
+        yield return EatSlot(slot);
+        c.Result = $"Ate {itemName}: energy {before} → {(int)P.Stamina}.";
+    }
+
+    /// <summary>Eat the item in a slot with the game's own <c>Farmer.eatHeldObject</c> and wait for the animation to end (shared by eat and fight's eat_below).</summary>
+    internal static IEnumerator EatSlot(int slot)
+    {
         P.CurrentToolIndex = slot;
         P.eatHeldObject();
         yield return Ticks(30);
         for (int i = 0; i < 400 && P.isEating; i++) yield return null;
         yield return WaitIdle();
-        c.Result = $"Ate {itemName}: energy {before} → {(int)P.Stamina}.";
     }
 
     // ------------------------------------------------------------------ sleep
@@ -1149,6 +1160,7 @@ public static partial class AgentTools
         else if (Game1.activeClickableMenu != null)
             Game1.exitActiveMenu();
         Game1.dialogueUp = false;
+        Briefing.CaptureForSleep();
         P.isInBed.Value = true;
         house.answerDialogueAction("Sleep_Yes", Array.Empty<string>());
         Rt.Log.Add("system", text: "Sleeping...");
@@ -1174,7 +1186,7 @@ public static partial class AgentTools
         }
         yield return Ticks(60);
 
-        if (Game1.Date.TotalDays <= dayBefore) { c.Fail("Tried to sleep but the day did not change."); yield break; }
+        if (Game1.Date.TotalDays <= dayBefore) { Briefing.Unseal(); c.Fail("Tried to sleep but the day did not change."); yield break; }
         Rt.Log.Add("system", text: $"New day: farm day {AgentLog.FarmDay}");
         c.Result = $"Good morning! It's now farm day {AgentLog.FarmDay}. Money {moneyBefore}g → {P.Money}g (shipping income {P.Money - moneyBefore}g). Your day is over — stop here.";
     }

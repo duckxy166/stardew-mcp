@@ -551,6 +551,30 @@ def pass_out():
         raise Smoke(f"journal(day={day}) did not clear the pending journal: {s.get('pendingJournalDay')}")
 
 
+@case("briefing")
+def morning_briefing():
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=5)  # Parsnip, 35g each
+    ok("ship", item="Parsnip", quantity=5, reason="smoke test")
+    debug("add_mail", id="smoke_letter")
+    if "📬" not in ok("inventory"):
+        raise Smoke("the footer does not show the mailbox hint while a letter is waiting")
+    journal_and_sleep("Smoke test diary: shipped five parsnips and left a letter in the mailbox.")
+    data = {}
+    for _ in range(30):  # the report is built about 1.5 s after the morning starts
+        data = _request("/api/briefing?seat=p1", timeout=10)
+        if data.get("ready"):
+            break
+        time.sleep(1)
+    if not data.get("ready"):
+        raise Smoke(f"briefing never became ready: {str(data)[:200]}")
+    text = data.get("text", "")
+    # 175g for normal-quality Parsnips; a profession bonus can raise it, so only the shape is checked.
+    for pattern in (r"Parsnip x5 = \d+g", r"Mail: \d+ letters?", r"Weather today: \w+", r"Crops: "):
+        if not re.search(pattern, text):
+            raise Smoke(f"briefing misses /{pattern}/:\n{text}")
+
+
 @case("buy_recipe")
 def buy_recipe():
     """#7: a bought recipe is learned, not handed over as the dish."""

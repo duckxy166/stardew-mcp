@@ -36,6 +36,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import briefing
 import memory
 import pass_out
 
@@ -288,8 +289,8 @@ def main():
         system_prompt = memory.inject(template, log_dir, args.goal, recent_diaries(log_dir, day))
         for part in range(1, args.max_parts + 1):
             if part == 1:
-                prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
-                          "จากนั้นเล่นทั้งวัน ก่อนนอนให้เขียน journal (diary, lessons, plan) แล้วเข้านอนด้วย go_to_bed")
+                # The morning briefing replaces "start with status and look" (falls back to it if the mod has none).
+                prompt = briefing.morning_prompt(day, briefing.build(api_get, day, "p1", out_dir=out_dir))
                 prompt = memory.with_reminder(prompt, state, log_dir)
                 # The previous day ended by passing out: say what happened and ask for that day's journal first.
                 prompt = pass_out.with_morning_notice(prompt, state, lambda d: last_actions(log_dir, d))

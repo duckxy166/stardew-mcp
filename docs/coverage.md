@@ -66,7 +66,7 @@ Rules:
 | Load a machine | action while holding the input | `interact(holding)` | ✅ smoke `furnace` | #3 |
 | Collect from a machine | action | `interact` | ✅ smoke `furnace` | #3 |
 | Chests, fridge | action → `ItemGrabMenu` | `interact`, then `menu take/put` | ✅ chests (smoke `chest`); 🟡 fridge untested (needs the kitchen) | #3 |
-| Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ | |
+| Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ next morning's briefing lists what was sold per item (smoke `briefing`) | #29 |
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `journal`, then `go_to_bed` (refuses until today's journal is written) | ✅ one player (smoke `journal`); 🟡 untested with 4 seats | #38, #21 |
 | Pass out (2:00, health 0, exhaustion) | automatic; the day ends without a bed | `pass_out` record in `/api/state` and the log (cause, place, running action, money, items lost); `POST /api/release_freeze` lets the clock run out; next morning the runner asks for `journal(day=N)` first | 🟡 smoke `pass_out` (2:00 AM) written, not run yet; health 0 in the mines untested | #22 |
@@ -102,7 +102,7 @@ Rules:
 | Dating, marriage | give a bouquet, later a Mermaid Pendant | `talk_to(gift_item)` | 🟡 untested | |
 | Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
-| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
+| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed; the morning briefing and the footer (`📬 N letters`) say when mail is waiting (smoke `briefing`) | #29 |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
 | Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
@@ -117,7 +117,8 @@ Rules:
 | Crab pots | place, then action holding bait | `place`, `interact(holding)` | ❌ | #4 |
 | Mine ladders, shafts | action on a tile | `interact` | ✅ | |
 | Mine elevator | `MineElevator` → `MineElevatorMenu` | `menu choose` | ✅ smoke `mine_elevator` | #2 |
-| Combat | weapon swings, aim | fight driver | ❌ | #5, #6 |
+| Combat | weapon swings, aim | `fight`: best weapon, walk to the nearest monster, swing with `Farmer.BeginUsingTool`; `eat_below` eats through the `eat` tool's path (`Farmer.eatHeldObject`) | 🟡 untested, no smoke case yet | #5, #6 |
+| Mine survival | watch health, eat, climb out | runtime interrupt when a monster within 3 tiles hurts the farmer (every action except `fight`, `eat`, `leave_mine`); `fight` stops at 30% HP; `leave_mine` walks to the up ladder (tile 115) and uses it with `checkAction`, else `Game1.warpFarmer` to the Mine; the footer shows HP and warns from 11 PM | 🟡 untested, no smoke case yet | #6 |
 | Festivals | arrive on time → ready check `festivalStart` → actions, shops, games | travel + primitives + game drivers | ❌ | #11 |
 | Night events: fairy, witch, meteorite, Qi plane | automatic | | 🟡 they play by themselves | |
 | Arcade, casino, darts, crane | `IMinigame`, `CalicoJack`, `Slots` | drivers (optional) | ❌ | |

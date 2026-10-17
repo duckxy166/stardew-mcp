@@ -19,6 +19,7 @@ namespace StardewMCP.Agent;
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
 ///   GET  /api/memory each AI seat's lessons, plan and notes (what the journal tool wrote)
+///   GET  /api/briefing?seat=p1  morning briefing of one AI seat (JSON; see Briefing.cs)
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
 ///   POST /api/release_freeze  runner: stop freezing the world for a seat (body {"seat":"p1"|"all","on":true}) until its farmer
 ///                    passes out; ends by itself on the next farm day (#22)
@@ -138,6 +139,11 @@ public class AgentHttp
                     return;
                 case "/api/state":
                     await Text(res, StateJson, "application/json");
+                    return;
+                case "/api/briefing":
+                    var (briefStatus, briefBody) = await Briefing.Serve(req.QueryString["seat"], _config.SplitScreen);
+                    if (briefStatus != 200) { res.StatusCode = briefStatus; res.Close(); return; }
+                    await Text(res, briefBody, "application/json");
                     return;
                 case "/api/days":
                     await Json(res, _log.Days());
