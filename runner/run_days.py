@@ -29,6 +29,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import briefing
+
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
 DEFAULT_OUT = HERE.parent / "runs"
@@ -217,8 +219,8 @@ def main():
         system_prompt = template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
         for part in range(1, args.max_parts + 1):
             if part == 1:
-                prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
-                          "จากนั้นเล่นทั้งวันจนเข้านอนด้วย go_to_bed")
+                # The morning briefing replaces "start with status and look" (falls back to it if the mod has none).
+                prompt = briefing.morning_prompt(day, briefing.build(api_get, day, "p1", out_dir=out_dir))
             else:
                 prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
                           f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")

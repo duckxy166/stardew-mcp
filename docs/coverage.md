@@ -66,7 +66,7 @@ Rules:
 | Load a machine | action while holding the input | `interact(holding)` | ✅ smoke `furnace` | #3 |
 | Collect from a machine | action | `interact` | ✅ smoke `furnace` | #3 |
 | Chests, fridge | action → `ItemGrabMenu` | `interact`, then `menu take/put` | ✅ chests (smoke `chest`); 🟡 fridge untested (needs the kitchen) | #3 |
-| Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ | |
+| Ship | shipping bin → `ItemGrabMenu` (`Farm.shipItem`) | `ship` | ✅ next morning's briefing lists what was sold per item (smoke `briefing`) | #29 |
 | Eat | action holding food → "Eat?" | `eat` | ✅ | |
 | Sleep | bed → `Sleep_Yes` → ready check `sleep` | `go_to_bed` | ✅ one player; 🟡 untested with 4 seats | #38 |
 | Pass out (2:00, no energy) | automatic | | 🟡 | #22 |
@@ -102,7 +102,7 @@ Rules:
 | Dating, marriage | give a bouquet, later a Mermaid Pendant | `talk_to(gift_item)` | 🟡 untested | |
 | Children | night question, then `NamingMenu` | choice policy | ❌ name is random | |
 | Naming pets, animals, horse | `NamingMenu` | `menu type` | 🟡 `menu type` works, but the choice policy names first at random | |
-| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed | |
+| Mail | mailbox → `LetterViewerMenu` | `interact` + `close_menu` | ✅ attachments are claimed; the morning briefing and the footer (`📬 N letters`) say when mail is waiting (smoke `briefing`) | #29 |
 | Help Wanted, quest log | `Billboard` tile, `QuestLog` | menu adapter | ❌ | #14 |
 | Special Orders | `SpecialOrders` tile → `SpecialOrdersBoard` | menu adapter | ❌ | #27 |
 | Community Center | `JunimoNoteMenu` | menu adapter | ❌ | #13 |
