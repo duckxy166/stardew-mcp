@@ -102,15 +102,21 @@ mod/StardewMCP/
     AgentTools.cs      Tool definitions (ToolDef) and their coroutines
     MenuTools.cs       menu: reads any open menu and clicks it through per-menu adapters (part of AgentTools)
     SocialTools.cs     say / whisper / emote / give / plan board; per-seat inbox appended to the next tool result
+    Perception.cs      Players in view with what they actually do vs. what they claimed; per-seat events (mention, whisper, gift, theft, arrival, weather) that interrupt a running action
+    CommunityTools.cs  bundles / donate_bundle / museum; BundleReader and LateBound (reflection for unchecked game members) are shared with Joja (#26)
+    JojaTools.cs       joja: membership (confirm guard) / projects / buy_project, the route decision record and the standing plan board section
     WorldText.cs       Text renderings of status / surroundings / inventory for the model
     AgentLog.cs        Per-day JSONL logs and diaries; per-seat lessons / plan / notes files (MemoryFile)
     JournalTools.cs    journal(diary, lessons, plan, notes, day): the AI's memory across days; go_to_bed needs today's
+    ToolResult.cs      Reason codes, partial flag and counts of tool results; MCP reply tag + structuredContent; day_XXX_summary.json
     ModConfig.cs       config.json settings
     DebugApi.cs        /api/debug/* and /api/debug/p{N}/* test hooks (warp, build_cabins, capture...), off by default
     Players.cs         The 4 split-screen seats (P1-P3 AI, P4 camera) and their per-screen state
     WorldClock.cs      Freezes the world while any connected AI thinks (host pause); thinking timeout
+    DayStats.cs        Per-seat daily stats (stats_NNN[_pN].json at day rollover, GET /api/stats)
     SplitScreen.cs     Joins P2-P4 without gamepads, per-screen zoom, gamepad-hint cleanup
     SplitScreenPatches.cs  Harmony: P1 input lock, clean frozen frames, hidden join lines, frame capture
+    RunControl.cs      Pause / stop_after_day / stop_now (F8, POST /api/control), unknown-menu watch for go_to_bed
 studio/
   overlay.html         OBS browser-source overlay
   replay.html          Day-by-day replay of the logs
@@ -119,9 +125,16 @@ studio/
 runner/
   smoke.py             LLM-free tool tests on a smoke_* copy of the save (gate for run_days.py)
   run_days.py          One `claude -p` session per in-game day
+  game_watchdog.py     Detects a game crash/hang, relaunches with AutoLoadSave, replays the day (max 2 retries)
+  run_control.py       Pause / stop flags for run_days.py (graceful Ctrl+C); CLI: run_control.py pause|resume|stop_after_day|stop_now
+  save_backup.py       Backs up the save named by /api/state saveFolder (never smoke_*), keeps the last N
+  restore_day.py       Rolls the farm back to the end of a day (for mod bugs), sets later files aside in abandoned/
+  tool_results.py      Reason codes and result tags (Python side of ToolResult.cs); day summary printing
   obs_recorder.py      Pauses OBS recording while the game is frozen
   memory.py            Lessons / plan / notes injected into the system prompt; batch-end consolidation
-  tests/               pytest tests for memory.py (no game needed)
+  stats.py             batch_report.md, usage_NNN.json, the Thai morning stats line (from the mod's stats files)
+  compare_runs.py      Two runs side by side at checkpoint days
+  tests/               pytest for memory.py, stats.py and compare_runs.py (no game needed)
   system_prompt.md     System prompt used by run_days.py
 ```
 
@@ -145,6 +158,37 @@ cd mod/StardewMCP
 dotnet build -c Release                                    # builds, deploys to Mods/, makes zip
 dotnet build -p:EnableModDeploy=false -p:EnableModZip=false   # compile check only
 ```
+
+## Tests
+
+The mod build needs the game's DLLs (ModBuildConfig), so CI and the test projects never build it.
+
+```
+dotnet test mod/StardewMCP.Tests                                  # C# xUnit, game-free
+pip install pytest && python -m pytest -q runner/tests studio     # Python
+```
+
+```
+mod/StardewMCP.Tests/  Does NOT reference the mod project; compiles the game-free mod files below via
+                       <Compile Include Link> and shims Point/Vector2 (Shims/XnaTypes.cs)
+runner/tests/          pytest: run_days.py stream parsing / diaries / day rollover, tool schemas read from the C# source
+runner/samples/        Synthetic claude stream-json transcripts, game logs and diaries used by those tests
+```
+
+Game-free mod files (no `Game1`, `GameLocation`, `Farmer`; linked into the tests):
+
+```
+mod/StardewMCP/PathSearch.cs         A* over IWalkableGrid (Pathfinder.cs supplies the game's collision check)
+mod/StardewMCP/Agent/ToolDef.cs      ToolDef, CallContext, ToolRunner
+mod/StardewMCP/Agent/ToolArgs.cs     Schema and argument helpers (Obj, Str, Int, Tiles, S, I, TileList), part of AgentTools
+mod/StardewMCP/Agent/ToolContract.cs Rules for tools/list (valid schema, required in properties, reason on actions); logged at startup
+mod/StardewMCP/Agent/McpDispatcher.cs JSON-RPC handling over IMcpSeat; McpSeat.cs adapts a real seat for AgentHttp
+mod/StardewMCP/Agent/WorldText.Format.cs  FormatTime, DirName, part of WorldText
+```
+
+New logic that can run without the game goes into such a file with a test; keep moves small and leave a
+forwarder behind. A tool's `reason`, snake_case name and `required` list are checked by `ToolContract` and
+`runner/tests/test_tool_sources.py`.
 
 ## Rules
 

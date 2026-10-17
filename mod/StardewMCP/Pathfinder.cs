@@ -10,59 +10,18 @@ namespace StardewMCP;
 /// moves, where a tile counts as walkable when the game's own collision check lets the
 /// farmer stand on it.
 /// </summary>
-public class Pathfinder
+public partial class Pathfinder
 {
-    /// <summary>Tiles expanded before giving up; big maps (Farm, Forest) need tens of thousands.</summary>
-    private const int ExpandLimit = 60000;
-
-    private static readonly Point[] Moves = { new(0, -1), new(1, 0), new(0, 1), new(-1, 0) };
-
-    private readonly Dictionary<Point, bool> _walkable = new();
+    // The search itself (and the IWalkableGrid it runs over) lives in PathSearch.cs, which has no
+    // game types so the unit tests can compile it. This half asks the game's collision check.
 
     /// <summary>
     /// Route from <paramref name="start"/> to <paramref name="goal"/> as the tiles to step on in
     /// order, excluding the start tile and ending on the goal. Empty when already there, null when
     /// the goal can't be stood on or can't be reached.
     /// </summary>
-    public List<Vector2>? FindPath(GameLocation location, Vector2 start, Vector2 goal)
-    {
-        var from = new Point((int)start.X, (int)start.Y);
-        var to = new Point((int)goal.X, (int)goal.Y);
-        if (from == to)
-            return new List<Vector2>();
-        if (!Walkable(location, to))
-            return null;
-
-        var steps = new Dictionary<Point, int> { [from] = 0 };
-        var parent = new Dictionary<Point, Point>();
-        var done = new HashSet<Point>();
-        var frontier = new PriorityQueue<Point, int>();
-        frontier.Enqueue(from, Distance(from, to));
-
-        while (frontier.TryDequeue(out var tile, out _))
-        {
-            if (tile == to)
-                return Unwind(parent, from, to);
-            if (!done.Add(tile))
-                continue; // stale queue entry
-            if (done.Count > ExpandLimit)
-                break;
-
-            int cost = steps[tile] + 1;
-            foreach (var move in Moves)
-            {
-                var next = new Point(tile.X + move.X, tile.Y + move.Y);
-                if (done.Contains(next) || (steps.TryGetValue(next, out int known) && known <= cost))
-                    continue;
-                if (!Walkable(location, next))
-                    continue;
-                steps[next] = cost;
-                parent[next] = tile;
-                frontier.Enqueue(next, cost + Distance(next, to));
-            }
-        }
-        return null;
-    }
+    public List<Vector2>? FindPath(GameLocation location, Vector2 start, Vector2 goal) =>
+        FindPath(new LocationGrid(location), start, goal);
 
     /// <summary>
     /// Whether the farmer could stand on this tile right now: inside the map and not colliding
@@ -79,22 +38,13 @@ public class Pathfinder
         return !location.isCollidingPosition(feet, Game1.viewport, true, 0, false, Game1.player);
     }
 
-    /// <summary>Cached <see cref="IsWalkable"/>, since one search probes the same tiles repeatedly.</summary>
-    private bool Walkable(GameLocation location, Point tile)
+    /// <summary>The game's collision check as an <see cref="IWalkableGrid"/>.</summary>
+    private sealed class LocationGrid : IWalkableGrid
     {
-        if (!_walkable.TryGetValue(tile, out bool ok))
-            _walkable[tile] = ok = IsWalkable(location, tile.X, tile.Y);
-        return ok;
-    }
+        private readonly GameLocation _location;
 
-    private static int Distance(Point a, Point b) => Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y);
+        public LocationGrid(GameLocation location) => _location = location;
 
-    private static List<Vector2> Unwind(Dictionary<Point, Point> parent, Point from, Point to)
-    {
-        var route = new List<Vector2>();
-        for (var tile = to; tile != from; tile = parent[tile])
-            route.Add(tile.ToVector2());
-        route.Reverse();
-        return route;
+        public bool IsWalkable(int x, int y) => Pathfinder.IsWalkable(_location, x, y);
     }
 }

@@ -13,21 +13,15 @@ using SObject = StardewValley.Object;
 namespace StardewMCP.Agent;
 
 /// <summary>Compact, LLM-friendly text views of the game world.</summary>
-public static class WorldText
+public static partial class WorldText
 {
     public const string Legend =
-        "@ you | . walkable | , tillable ground | # blocked | ~ water | D door/exit/ladder | A action tile (shop counter, etc) | " +
+        "@ you | . walkable | , tillable ground | # blocked | ~ water (refill the can, fish) | * fish bubbles (cast here: bites come faster) | D door/exit/ladder | A action tile (shop counter, etc) | " +
         "N villager | M monster | H building | b shipping bin | Z your bed | f furniture | O object/machine/chest | W weeds | w twig | S stone | " +
         "L large stump/log/boulder | T tree | t young tree/sapling | s tree stump | Y fruit tree | u bush | g grass | F forage item | " +
         "= tilled soil (empty) | c crop needs water | C crop watered | ! crop ready to harvest | x dead crop";
 
-    public static string FormatTime(int t)
-    {
-        int h = t / 100, m = t % 100;
-        return $"{h:00}:{m:00}";
-    }
-
-    public static string DirName(int d) => d switch { 0 => "up", 1 => "right", 2 => "down", 3 => "left", _ => "?" };
+    // FormatTime and DirName are in WorldText.Format.cs (no game types, compiled by the unit tests).
 
     public static string Status()
     {
@@ -35,17 +29,26 @@ public static class WorldText
         var loc = Game1.currentLocation;
         var sb = new StringBuilder();
         sb.AppendLine($"Farm day {AgentLog.FarmDay} — {Game1.currentSeason} {Game1.dayOfMonth}, year {Game1.year} ({Game1.shortDayNameFromDayOfSeason(Game1.dayOfMonth)}) {FormatTime(Game1.timeOfDay)} · weather: {Weather()}");
+        sb.AppendLine(AgentTools.OutlookLine()); // festival today, tomorrow's weather, daily luck (CalendarTools.cs)
         sb.AppendLine($"Location: {loc?.Name}{(loc is StardewValley.Locations.MineShaft ms ? $" (floor {ms.mineLevel})" : "")} at ({p.TilePoint.X},{p.TilePoint.Y}) facing {DirName(p.FacingDirection)}");
         sb.AppendLine($"Energy {(int)p.Stamina}/{p.MaxStamina} · Health {p.health}/{p.maxHealth} · Money {p.Money}g");
         var held = p.CurrentItem;
         var owned = Professions.Owned(p);
         if (owned.Length > 0) sb.AppendLine($"Professions: {owned}");
         sb.AppendLine($"Holding: {(held == null ? "nothing" : $"{held.DisplayName} x{held.Stack}")} (slot {p.CurrentToolIndex})");
+        var fishing = AgentTools.FishingLine();
+        if (fishing.Length > 0) sb.AppendLine(fishing);
+        var gear = AgentTools.StatusExtras(p);
+        if (gear.Length > 0) sb.AppendLine(gear);
         if (p.questLog.Count > 0)
         {
             var quests = p.questLog.Where(q => q != null && !q.completed.Value).Select(q => q.GetName()).Take(4).ToList();
-            if (quests.Count > 0) sb.AppendLine($"Active quests: {string.Join(" | ", quests)}");
+            if (quests.Count > 0) sb.AppendLine($"Active quests: {string.Join(" | ", quests)} (quests has the details)");
         }
+        var inView = Perception.InViewText(Perception.ViewRadius);
+        if (inView.Length > 0) sb.AppendLine(inView);
+        var ranch = RanchText.Status();
+        if (ranch.Length > 0) sb.AppendLine(ranch);
         sb.Append(MenuState());
         return sb.ToString().TrimEnd();
     }
@@ -63,7 +66,7 @@ public static class WorldText
     {
         var sb = new StringBuilder();
         if (Game1.eventUp)
-            sb.AppendLine("A cutscene/event is playing.");
+            sb.AppendLine(AgentTools.FestivalLine() ?? "A cutscene/event is playing.");
         switch (Game1.activeClickableMenu)
         {
             case null:
@@ -82,14 +85,19 @@ public static class WorldText
                     sb.AppendLine("Use respond() to continue the dialogue.");
                 break;
             case ShopMenu shop:
-                sb.AppendLine($"Shop menu open ({shop.ShopId}). Use shop_list / buy, then close_menu.");
+                sb.AppendLine($"Shop menu open ({shop.ShopId}). Use shop_list / buy / sell, then close_menu.");
                 break;
             case LetterViewerMenu letter:
                 var letterText = letter.mailMessage != null ? string.Join(" ", letter.mailMessage).Replace("\n", " ").Replace("^", " ") : "";
                 sb.AppendLine($"Letter open: \"{letterText}\". Use close_menu (attached items and quests will be claimed automatically).");
                 break;
+            case NamingMenu nm:
+                sb.AppendLine(Naming.StatusLine(nm));
+                break;
             default:
-                sb.AppendLine($"Menu open: {AgentTools.MenuName(Game1.activeClickableMenu)}. Use menu() to read and use it, or close_menu.");
+                // A Yes/No or proposal box (#53) has its own tool; any other menu is read with menu().
+                sb.AppendLine(Romance.MenuLine(Game1.activeClickableMenu) ??
+                              $"Menu open: {AgentTools.MenuName(Game1.activeClickableMenu)}. Use menu() to read and use it, or close_menu.");
                 break;
         }
         return sb.ToString();
@@ -105,9 +113,10 @@ public static class WorldText
             var it = p.Items[i];
             if (it == null) continue;
             var extra = it is SObject o && o.Edibility > -300 ? $", edible +{o.staminaRecoveredOnConsumption()} energy" : "";
-            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{extra}]");
+            var quality = it is not Tool && it.Quality > 0 ? $", {AgentTools.QualityName(it.Quality)}" : "";
+            sb.AppendLine($"  slot {i}: {it.DisplayName} x{it.Stack} [{(it is Tool ? "tool" : it.getCategoryName())}{quality}{extra}{AgentTools.RodNote(it)}]");
         }
-        return sb.ToString().TrimEnd();
+        return (sb.ToString().TrimEnd() + "\n" + AgentTools.InventoryExtras(p)).TrimEnd();
     }
 
     /// <summary>One-character symbol and optional label for a tile.</summary>
@@ -119,12 +128,14 @@ public static class WorldText
 
         if (p.TilePoint == pt) return ('@', null);
 
-        foreach (var npc in loc.characters)
+        foreach (var npc in loc.characters.Concat(AgentTools.FestivalActors())) // festival villagers are event actors
         {
             if (npc.TilePoint != pt) continue;
             if (npc is StardewValley.Monsters.Monster mon) return ('M', $"{mon.Name} (HP {mon.Health})");
             if (npc.IsVillager) return ('N', npc.displayName);
         }
+
+        if (RanchText.AnimalAt(loc, pt) is { } animal) return (animal.sym, animal.label);
 
         if (loc is StardewValley.Locations.MineShaft mine)
         {
@@ -215,9 +226,10 @@ public static class WorldText
         }
 
         var action = loc.doesTileHaveProperty(x, y, "Action", "Buildings");
-        if (action != null) return ('A', action);
+        if (action != null) return ('A', ActionTiles.Label(action));
 
-        if (loc.isWaterTile(x, y)) return ('~', null);
+        if (loc.isWaterTile(x, y))
+            return AgentTools.IsFishSplash(loc, x, y) ? ('*', "Fish bubbles (fish here: bites come faster)") : ('~', null);
 
         if (!Pathfinder.IsWalkable(loc, x, y)) return ('#', null);
 
@@ -244,7 +256,9 @@ public static class WorldText
         return data?.DisplayName ?? "crop";
     }
 
-    public static string Look(int radius)
+    /// <param name="kinds">Only list these kinds of things (see <see cref="Observation"/>); null lists everything. The map is always complete.</param>
+    /// <param name="diff">Report only the tiles that changed since the last look on this map.</param>
+    public static string Look(int radius, HashSet<string>? kinds = null, bool diff = false)
     {
         var loc = Game1.currentLocation;
         var p = Game1.player;
@@ -253,9 +267,14 @@ public static class WorldText
         int x0 = Math.Max(0, px - radius), x1 = Math.Min(w - 1, px + radius);
         int y0 = Math.Max(0, py - radius), y1 = Math.Min(h - 1, py + radius);
 
+        if (diff && Observation.Diff(loc, px, py, x0, x1, y0, y1) is { } changes)
+            return changes;
+
+        var cells = new Dictionary<(int x, int y), (char sym, string? label)>();
         var labels = new Dictionary<string, List<(int x, int y)>>();
         var sb = new StringBuilder();
         sb.AppendLine($"Map {loc.Name} ({w}x{h}). You @ ({px},{py}) facing {DirName(p.FacingDirection)}. Showing x {x0}-{x1}, y {y0}-{y1}.");
+        if (diff) sb.AppendLine("Diff: nothing earlier to compare with on this map (or most of this view is new), so this is the full view.");
 
         var tens = new StringBuilder("        ");
         var ones = new StringBuilder("        ");
@@ -273,6 +292,7 @@ public static class WorldText
             for (int x = x0; x <= x1; x++)
             {
                 var (sym, label) = Describe(loc, x, y);
+                cells[(x, y)] = (sym, label);
                 sb.Append(sym);
                 if (label != null && sym != '@')
                 {
@@ -284,18 +304,24 @@ public static class WorldText
             sb.AppendLine();
         }
 
-        sb.AppendLine("Things in view (nearest first):");
-        foreach (var kv in labels.OrderBy(kv => kv.Value.Min(t => Math.Abs(t.x - px) + Math.Abs(t.y - py))))
+        sb.AppendLine(Observation.ListHeading(kinds));
+        foreach (var kv in labels.Where(kv => Observation.Wants(kinds, kv.Key)).OrderBy(kv => kv.Value.Min(t => Math.Abs(t.x - px) + Math.Abs(t.y - py))))
         {
             var pts = kv.Value.OrderBy(t => Math.Abs(t.x - px) + Math.Abs(t.y - py)).ToList();
             var shown = string.Join(" ", pts.Take(10).Select(t => $"({t.x},{t.y})"));
             sb.AppendLine($"  {kv.Key} x{pts.Count}: {shown}{(pts.Count > 10 ? " ..." : "")}");
         }
 
+        var inView = Perception.InViewText(radius);
+        if (inView.Length > 0) sb.AppendLine(inView);
+        var ranchSection = RanchText.LookSection(loc);
+        if (ranchSection.Length > 0) sb.AppendLine(ranchSection);
+
         var exits = loc.warps.Select(wp => $"{wp.TargetName}").Concat(loc.doors.Values.Select(d => d)).Distinct().ToList();
         if (exits.Count > 0)
             sb.AppendLine($"Exits from this map lead to: {string.Join(", ", exits)} (use travel_to).");
-        sb.AppendLine("Legend: " + Legend);
+        Observation.Remember(loc, cells);
+        sb.AppendLine("Legend: " + Observation.LegendFor(cells.Values.Select(c => c.sym)));
         return sb.ToString().TrimEnd();
     }
 }

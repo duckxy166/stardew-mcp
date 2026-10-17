@@ -27,12 +27,15 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+
+from tool_results import check_structured
 
 API = "http://localhost:8770"
 SMOKE_PREFIX = "smoke_"
@@ -84,8 +87,8 @@ def state() -> dict:
 _rpc_id = 0
 
 
-def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
-    """Call an MCP tool on one seat's endpoint (p1, p2, p3). Returns (ok, text). Also checks the result shape."""
+def call_raw(seat: str, tool: str, args: dict) -> dict:
+    """Call an MCP tool on one seat's endpoint (p1, p2, p3). Returns the whole result object after checking its shape."""
     global _rpc_id
     _rpc_id += 1
     msg = {"jsonrpc": "2.0", "id": _rpc_id, "method": "tools/call", "params": {"name": tool, "arguments": args}}
@@ -99,10 +102,18 @@ def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
         raise Smoke(f"{tool}: bad result shape (content): {str(result)[:200]}")
     if not isinstance(result.get("isError"), bool):
         raise Smoke(f"{tool}: bad result shape (isError): {str(result)[:200]}")
-    text = content[0]["text"]
-    if not text.strip():
+    if not content[0]["text"].strip():
         raise Smoke(f"{tool}: empty result text")
-    return (not result["isError"]), text
+    problems = check_structured(result)  # reason code, partial flag and tag (#18); nothing to check on older mod builds
+    if problems:
+        raise Smoke(f"{tool}: bad structured result: {'; '.join(problems)} in {str(result)[:200]}")
+    return result
+
+
+def call_seat(seat: str, tool: str, args: dict) -> tuple[bool, str]:
+    """call_raw, reduced to (ok, text)."""
+    result = call_raw(seat, tool, args)
+    return (not result["isError"]), result["content"][0]["text"]
 
 
 def call(tool: str, /, **args) -> tuple[bool, str]:
@@ -232,6 +243,8 @@ def reset(location: str = "Farm") -> None:
     debug("set_stamina", n=270)
     debug("set_health", n=100)
     debug("set_money", n=2000)
+    # Events about other seats (arrivals, weather) must not cut a case's walk short; "caught_slacking" switches them on itself.
+    debug("perception", interrupts=0, clear=1)
     if fresh_state().get("location") != location:
         ok("travel_to", location=location, reason="smoke test setup")
 
@@ -268,6 +281,36 @@ def parse_things(look_text: str, symbol: str) -> list[tuple[str, list[tuple[int,
     return out
 
 
+def parse_cookable(listing: str) -> dict[str, int]:
+    """Dishes a `cook()` listing says can be cooked now, with how many times: {'Fried Egg': 4}."""
+    return {m.group(1): int(m.group(3))
+            for m in re.finditer(r"^  (.+?)(?: \(makes (\d+)\))?: .*\[you can cook (\d+)\]$", listing, re.M)}
+
+
+def parse_journal(text: str) -> list[dict]:
+    """Journal entries of a `quests` result: [{'type': 'Help Wanted', 'name': 'Lumber', 'who': 'Pierre'}, ...]."""
+    out = []
+    for m in re.finditer(r"^  \d+\. \[(Help Wanted|Story)\] (.+?)(?: - (?:asked by|about) (.+))?$", text, re.M):
+        out.append({"type": m.group(1), "name": m.group(2), "who": m.group(3) or ""})
+    return out
+
+
+def parse_board(text: str) -> dict | None:
+    """Today's Help Wanted line of a `quests` result: {'name', 'giver', 'state': 'free'|'taken'|'mine', 'by'}, or None when nothing is posted."""
+    m = re.search(r"^Help Wanted board \(Town\), today: \[Help Wanted\] (.+?)(?: - asked by (.+?))? - "
+                  r"(YOU took it|TAKEN by (.+?)\.|still FREE)", text, re.M)
+    if not m:
+        return None
+    state = "mine" if m.group(3).startswith("YOU") else "taken" if m.group(3).startswith("TAKEN") else "free"
+    return {"name": m.group(1), "giver": m.group(2) or "", "state": state, "by": m.group(4) or ""}
+
+
+def parse_money_left(text: str) -> int | None:
+    """'1950g left.' at the end of a crack_geode result."""
+    m = re.search(r"(\d+)g left\.", text)
+    return int(m.group(1)) if m else None
+
+
 def inventory_count(name: str) -> int:
     """Total stack size of items called exactly `name` in the `inventory` tool output."""
     total = 0
@@ -276,6 +319,18 @@ def inventory_count(name: str) -> int:
         if m and m.group(1).lower() == name.lower():
             total += int(m.group(2))
     return total
+
+
+def inventory_stacks(name: str) -> dict[str, int]:
+    """Stack sizes of items called exactly `name` by quality ('normal', 'silver', 'gold', 'iridium'), from `inventory`."""
+    out: dict[str, int] = {}
+    for line in ok("inventory").splitlines():
+        m = re.match(r"\s*slot \d+: (.+?) x(\d+) \[(.*)\]$", line)
+        if m and m.group(1).lower() == name.lower():
+            tags = [t.strip() for t in m.group(3).split(",")]
+            quality = next((t for t in tags if t in ("silver", "gold", "iridium")), "normal")
+            out[quality] = out.get(quality, 0) + int(m.group(2))
+    return out
 
 
 def open_shop(location: str, hhmm: int) -> str:
@@ -290,6 +345,28 @@ def open_shop(location: str, hhmm: int) -> str:
         if good:
             return text
     raise Smoke(f"no action tile in {location} opened a shop (tried {counters[:6]})")
+
+
+def pack_slots(inventory_text: str) -> int:
+    """Pack size from the `inventory` tool: 'Money 500g · inventory (3/12 slots used):'."""
+    m = re.search(r"inventory \(\d+/(\d+) slots used\)", inventory_text)
+    if not m:
+        raise Smoke(f"inventory shows no pack size: {inventory_text.splitlines()[0]}")
+    return int(m.group(1))
+
+
+# Object ids of the bars Clint asks for in a tool upgrade.
+BAR_IDS = {"Copper Bar": "334", "Iron Bar": "335", "Gold Bar": "336", "Iridium Bar": "337"}
+
+
+def parse_trade_listing(listing: str) -> tuple[str, int, int, str] | None:
+    """First `shop_list` line that costs gold plus a trade item: (name, gold, count, trade item), else None.
+
+    Lines look like '  Copper Axe: 2000g + 5x Copper Bar' (a stock suffix may follow)."""
+    m = re.search(r"^\s+(.+?): (\d+)g \+ (\d+)x (.+?)(?: \(stock \d+\))?\s*$", listing, re.M)
+    if not m:
+        return None
+    return m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
 
 
 def fresh_state() -> dict:
@@ -340,6 +417,95 @@ def observe_tools():
     ok("think", text="smoke test")
 
 
+@case("knowledge")
+def knowledge():
+    """#16: crops and item_info read the game's own data. Both are instant: no game time passes."""
+    reset("Farm")
+    debug("add_item", id="(O)472", qty=3)  # Parsnip Seeds, so crops has a carried seed to mark
+    spring = ok("crops", season="spring")
+    for needle in ("Parsnip", "Cauliflower"):
+        if needle not in spring:
+            raise Smoke(f"crops(spring) has no {needle!r}:\n{spring[:600]}")
+    if "Will mature" not in spring:  # a spring season planned from day 1 always has crops that mature
+        raise Smoke(f"crops(spring) lists no crop that matures:\n{spring[:600]}")
+    if not re.search(r"you carry \d+", spring):
+        raise Smoke(f"crops(spring) does not mark the Parsnip Seeds in the inventory:\n{spring[:600]}")
+    summer = ok("crops", season="summer")
+    if "Melon" not in summer or "Cauliflower" in summer:
+        raise Smoke(f"crops(summer) should list Melon and not Cauliflower:\n{summer[:600]}")
+    ok("crops")  # the current season
+    good, text = call("crops", season="monsoon")
+    if good:
+        raise Smoke(f"crops accepted a made-up season: {text[:200]}")
+
+    info = ok("item_info", name="Parsnip")
+    if "35g" not in info:
+        raise Smoke(f"item_info Parsnip should show the 35g base price:\n{info[:600]}")
+    seeds = ok("item_info", name="Parsnip Seeds")
+    if "plants into Parsnip" not in seeds or "4 days" not in seeds:
+        raise Smoke(f"item_info Parsnip Seeds should link to the crop:\n{seeds[:600]}")
+    good, text = call("item_info", name="no such thing at all")
+    if good:
+        raise Smoke(f"item_info accepted an unknown item: {text[:200]}")
+
+
+def guard_notes(tool: str) -> list[dict]:
+    """The loop guard's "guard" lines for one tool, player p1, from the viewers' feed."""
+    return [e for e in _request("/api/feed")["entries"]
+            if e.get("kind") == "guard" and e.get("tool") == tool and e.get("player") == "p1"]
+
+
+@case("loop_guard_repeat")
+def loop_guard_repeat():
+    """#31: the same failing call gets a hint on the 3rd try and is refused without running on the 5th."""
+    reset("Farm")
+    call("close_menu")  # no shop or menu is open, so `buy` fails the same way every time; this call also ends any earlier streak
+    results = []
+    for i in range(1, 6):
+        # the AI's `reason` differs on every call: it must not make the calls look different
+        good, text = call("buy", item="Parsnip Seeds", quantity=1, reason=f"smoke test {i}")
+        if good:
+            raise Smoke(f"buy #{i} succeeded with no shop open: {text.splitlines()[0]}")
+        results.append(text)
+    for i in (0, 1):
+        if "You tried this" in results[i] or results[i].startswith("Not run"):
+            raise Smoke(f"buy #{i + 1} should fail plainly, got: {results[i].splitlines()[0]}")
+    for i, n in ((2, 3), (3, 4)):
+        if f"You tried this {n} times and it failed each time: No shop is open" not in results[i]:
+            raise Smoke(f"buy #{i + 1} lacks the repeat hint for {n} tries:\n{results[i]}")
+    if not results[4].startswith("Not run (repeated failure): You tried this 4 times"):
+        raise Smoke(f"buy #5 should be refused without running, got:\n{results[4]}")
+
+    types = [(n.get("args") or {}).get("type") for n in guard_notes("buy")[-3:]]
+    if types != ["repeat", "repeat", "refused"]:
+        raise Smoke(f"expected guard log lines repeat, repeat, refused for buy, got {types}")
+
+    ok("close_menu")  # any other call that ran ends the streak, so the same call may be tried again
+    good, text = call("buy", item="Parsnip Seeds", quantity=1, reason="smoke test after another call")
+    if good or "You tried this" in text or text.startswith("Not run"):
+        raise Smoke(f"buy after another call should fail plainly again, got: {text.splitlines()[0]}")
+
+
+@case("loop_guard_idle")
+def loop_guard_idle():
+    """#31: calls that only observe, with the clock frozen, get the no-progress hint (the 25th by default)."""
+    reset("Farm")
+    ok("close_menu")  # a successful action resets the no-progress counter
+    if not fresh_state().get("frozen"):
+        raise SkipCase('the clock is not frozen while the AI thinks: set "FreezeTimeWhileThinking": true in config.json')
+    hinted = 0
+    for i in range(1, 31):
+        if "You haven't done anything for a while" in ok("look", radius=5):
+            hinted = i
+            break
+    if not hinted:
+        raise Smoke("30 look calls in a row got no no-progress hint")
+    if hinted < 20:
+        raise Smoke(f"the no-progress hint came too early, after {hinted} looks")
+    if not any((n.get("args") or {}).get("type") == "no_progress" for n in guard_notes("look")):
+        raise Smoke("the no-progress hint is not in the guard log")
+
+
 @case("travel")
 def travel():
     reset("Farm")
@@ -349,6 +515,79 @@ def travel():
     text = ok("travel_to", location="Farm", reason="smoke test")
     if "Arrived in Farm" not in text:
         raise Smoke(f"expected arrival on Farm, got: {text.splitlines()[0]}")
+
+
+@case("farm_batch")
+def farm_batch():
+    """till_area -> farm_summary -> plant(area) -> farm_summary -> water_all, on three fresh tiles."""
+    if fresh_state().get("weather") in ("rain", "storm"):
+        raise SkipCase("rain waters new crops by itself; run this case on a dry day")
+    reset("Farm")
+    debug("add_item", id="(O)472", qty=9)  # Parsnip Seeds
+
+    def summary_count(text: str, label: str) -> int:
+        m = re.search(rf"^{re.escape(label)}: (\d+)", text, re.MULTILINE)
+        if not m:
+            raise Smoke(f"farm_summary has no '{label}' line: {text[:200]}")
+        return int(m.group(1))
+
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 tillable tiles near the farm entrance")
+    x, y = runs[0][0]
+
+    first = ok("farm_summary")
+    if "Farm summary of Farm" not in first:
+        raise Smoke(f"unexpected farm_summary header: {first.splitlines()[0]}")
+    soil, dry = summary_count(first, "Empty tilled soil"), summary_count(first, "Unwatered crops")
+
+    text = ok("till_area", x=x, y=y, w=3, h=1, reason="smoke test")
+    m = re.search(r"Tilled (\d+) of (\d+) tiles", text)
+    if not m or m.group(1) != "3" or m.group(2) != "3":
+        raise Smoke(f"expected 3 of 3 tiles tilled, got: {text.splitlines()[0]}")
+    if summary_count(ok("farm_summary"), "Empty tilled soil") != soil + 3:
+        raise Smoke("farm_summary did not count the 3 newly tilled tiles as empty soil")
+
+    text = ok("plant", item="Parsnip Seeds", area=[x, y, 3, 1], reason="smoke test")
+    if "Planted 3 " not in text:
+        raise Smoke(f"expected 3 seeds planted in the area, got: {text.splitlines()[0]}")
+    after_plant = ok("farm_summary")
+    if summary_count(after_plant, "Empty tilled soil") != soil:
+        raise Smoke("planted tiles still counted as empty soil")
+    if summary_count(after_plant, "Unwatered crops") != dry + 3:
+        raise Smoke("farm_summary did not count the 3 new crops as unwatered")
+
+    text = ok("water_all", reason="smoke test")
+    m = re.search(r"Watered (\d+) of (\d+) crops", text)
+    if not m or m.group(1) != m.group(2) or int(m.group(1)) < 3 or "partial=false" not in text:
+        raise Smoke(f"expected every dry crop watered, got: {text.splitlines()[0]}")
+    if summary_count(ok("farm_summary"), "Unwatered crops") != 0:
+        raise Smoke("crops are still unwatered after water_all")
+
+
+@case("villagers")
+def villagers():
+    reset("Farm")
+    text = ok("villagers")
+    if "Villagers on farm day" not in text or "Pierre" not in text:
+        raise Smoke(f"villagers() should list the roster with Pierre: {text[:200]}")
+    one = ok("villagers", name="Pierre")
+    if "Pierre" not in one or "heart" not in one:
+        raise Smoke(f"villagers(name=Pierre) has no details: {one[:200]}")
+    good, text = call("villagers", name="Nobody Here")
+    if good:
+        raise Smoke("villagers accepted an unknown name")
+    # Pierre is never on the Farm, so go=false must say where he is instead of walking off.
+    good, text = call("talk_to", name="Pierre", go=False, reason="smoke test")
+    if good or "not on this map" not in text:
+        raise Smoke(f"talk_to(go=false) should report where Pierre is: {text[:200]}")
+    if fresh_state().get("location") != "Farm":
+        raise Smoke("talk_to(go=false) moved the farmer")
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; the shop alias part needs another day")
+    text = ok("travel_to", location="Pierre", reason="smoke test")  # a shop owner's name is a place alias
+    if "Arrived in SeedShop" not in text:
+        raise Smoke(f"travel_to(Pierre) should arrive in SeedShop, got: {text.splitlines()[0]}")
 
 
 @case("shop_buy")
@@ -575,6 +814,57 @@ def morning_briefing():
             raise Smoke(f"briefing misses /{pattern}/:\n{text}")
 
 
+# Fields every stats_NNN.json has (mod/StardewMCP/Agent/DayStats.cs); runner/stats.py reads them.
+STATS_FIELDS = {
+    "money": ["start", "bedtime", "end"],
+    "income": ["earned", "shippingBin"],
+    "crops": ["planted", "harvested", "died", "unwateredAtBedtime"],
+    "energy": ["bedtime"],
+    "health": ["bedtime"],
+    "toolCalls": ["total", "failed"],
+    "skills": ["farming", "mining", "foraging", "fishing", "combat"],
+    "hearts": ["total"],
+    "mine": ["deepestFloor"],
+}
+
+
+@case("daily_stats")
+def daily_stats():
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=2)  # Parsnip
+    ok("ship", item="Parsnip", quantity=2, reason="smoke test")
+    day = fresh_state().get("day")
+    journal_and_sleep("Smoke test diary: checking the daily stats.")
+
+    doc = None
+    for _ in range(30):  # the mod writes the file on the first settled tick of the new day
+        doc = _request(f"/api/stats?n={day}").get("players", {}).get("p1")
+        if doc:
+            break
+        time.sleep(0.5)
+    if not doc:
+        raise Smoke(f"/api/stats?n={day} has no p1 stats after going to bed")
+    for section, keys in STATS_FIELDS.items():
+        if not isinstance(doc.get(section), dict):
+            raise Smoke(f"stats day {day}: missing section {section}")
+        for key in keys:
+            if key not in doc[section]:
+                raise Smoke(f"stats day {day}: missing {section}.{key}")
+    for key in ("passedOut", "passOutCause", "endedBy", "partial"):
+        if key not in doc:
+            raise Smoke(f"stats day {day}: missing {key}")
+    if doc["endedBy"] != "bed" or doc["passedOut"]:
+        raise Smoke(f"stats day {day}: expected to end in bed, got endedBy={doc['endedBy']} passedOut={doc['passedOut']}")
+    if doc["toolCalls"]["total"] < 2:
+        raise Smoke(f"stats day {day}: expected the ship and go_to_bed calls to be counted, got {doc['toolCalls']['total']}")
+    if doc["income"]["shippingBin"] <= 0:
+        raise Smoke(f"stats day {day}: shipped parsnips but the bin value is {doc['income']['shippingBin']}")
+    if doc["income"]["earned"] <= 0:
+        raise Smoke(f"stats day {day}: expected income from the shipped parsnips, got {doc['income']['earned']}")
+    if day not in _request("/api/stats").get("days", []):
+        raise Smoke(f"/api/stats does not list day {day}")
+
+
 @case("buy_recipe")
 def buy_recipe():
     """#7: a bought recipe is learned, not handed over as the dish."""
@@ -608,6 +898,119 @@ def buy_recipe():
     ok("close_menu")
 
 
+@case("backpack")
+def backpack():
+    """#2: the backpack is Pierre's BuyBackpack tile, not a shop item: look labels it, interact asks, respond buys."""
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; run the gate on another day")
+    reset("Farm")
+    slots = pack_slots(ok("inventory"))
+    if slots >= 36:
+        raise SkipCase("the pack already has 36 slots; run the gate on an earlier save")
+    price = 2000 if slots == 12 else 10000
+    debug("set_money", n=price + 500)
+    debug("set_time", time=1000)
+    ok("travel_to", location="SeedShop", reason="smoke test")
+    try:
+        tiles = [(label, t) for label, ts in parse_things(ok("look", radius=12), "A") if label.startswith("Backpack upgrade") for t in ts]
+        if not tiles:
+            raise Smoke("look shows no 'Backpack upgrade' tile in Pierre's shop")
+        label, (x, y) = tiles[0]
+        if f"{price}g" not in label:
+            raise Smoke(f"the tile label should show the {price}g price: {label}")
+        ok("interact", x=x, y=y, reason="smoke test")
+        options = question_options()
+        purchase = next((i for text, i in options.items() if "purchase" in text.lower()), None)
+        if purchase is None:
+            raise Smoke(f"no Purchase option in the backpack question: {options}")
+        ok("respond", option=purchase, reason="smoke test")
+        t0 = time.time()
+        while pack_slots(ok("inventory")) == slots and time.time() - t0 < 8:
+            time.sleep(0.5)
+        now = pack_slots(ok("inventory"))
+        if now != slots + 12:
+            raise Smoke(f"expected {slots + 12} slots after the purchase, have {now}")
+        if fresh_state().get("money") != 500:
+            raise Smoke(f"expected {price}g spent (500g left), money is {fresh_state().get('money')}g")
+    finally:
+        call("close_menu")
+
+
+@case("tool_upgrade")
+def tool_upgrade():
+    """#2/#7: Clint's upgrade shop asks for gold plus bars (a trade item); buy pays both through the game's own purchase."""
+    reset("Farm")
+    debug("set_money", n=30000)
+    try:
+        debug("open_shop", id="ClintUpgrade")  # set_time doesn't move Clint to the counter
+    except Smoke as e:
+        raise SkipCase(f"could not open the upgrade shop here: {e}")
+    try:
+        found = parse_trade_listing(ok("shop_list"))
+        if not found:
+            raise SkipCase("Clint offers no upgrade with a trade item (every tool already upgraded?)")
+        name, gold, count, bar = found
+        if bar not in BAR_IDS:
+            raise SkipCase(f"unknown trade item {bar}")
+        debug("add_item", id=f"(O){BAR_IDS[bar]}", qty=count)
+        bars, money = inventory_count(bar), fresh_state().get("money")
+        ok("buy", item=name, quantity=1, reason="smoke test")
+        if inventory_count(bar) != bars - count:
+            raise Smoke(f"expected {count} {bar} taken as payment, {bars} -> {inventory_count(bar)}")
+        if fresh_state().get("money") != money - gold:
+            raise Smoke(f"expected {gold}g spent, money {money} -> {fresh_state().get('money')}")
+    finally:
+        call("close_menu")
+
+
+@case("calendar")
+def calendar():
+    """#11: calendar lists the shops and the next festival; status shows tomorrow's weather and luck."""
+    reset("Farm")
+    now = fresh_state()
+    text = ok("calendar")
+    for needle in ("Today is ", "Shops (", "Next festival:"):
+        if needle not in text:
+            raise Smoke(f"calendar is missing \"{needle}\": {text.splitlines()[0]}")
+    if now.get("season") == "spring" and now.get("dayOfMonth", 99) < 13 and "Egg Festival" not in text:
+        raise Smoke("calendar does not mention the Egg Festival (spring 13)")
+    status = ok("status")
+    for needle in ("Tomorrow:", "Luck today:"):
+        if needle not in status:
+            raise Smoke(f"status is missing \"{needle}\"")
+    if "Festival today:" not in text:  # an ordinary day: there is no festival to start
+        good, _ = call("festival", action="start", reason="smoke test")
+        if good:
+            raise Smoke("festival(start) succeeded on a day without a festival")
+
+
+@case("sell_to_shop")
+def sell_to_shop():
+    """#11: sell pays gold at once through the shop menu (ship only pays overnight)."""
+    if fresh_state().get("dayOfMonth", 0) % 7 == 3:
+        raise SkipCase("Pierre's is closed on Wednesdays; run the gate on another day to cover selling")
+    reset("Farm")
+    debug("add_item", id="(O)24", qty=3)  # Parsnip
+    open_shop("SeedShop", 1000)  # Pierre's is open 9:00-17:00 (closed Wednesdays)
+
+    before = inventory_count("Parsnip")
+    money = fresh_state().get("money")
+    text = ok("sell", item="Parsnip", quantity=1, reason="smoke test")
+    m = re.search(r"Sold (\d+)x .+? for (\d+)g", text)
+    if not m or int(m.group(2)) <= 0:
+        raise Smoke(f"sell result has no positive price: {text.splitlines()[0]}")
+    sold = int(m.group(1))
+    if inventory_count("Parsnip") != before - sold:
+        raise Smoke(f"expected {before - sold} Parsnip after selling {sold}, have {inventory_count('Parsnip')}")
+    if fresh_state().get("money") != money + int(m.group(2)):
+        raise Smoke("money did not rise by the reported price")
+
+    good, text = call("sell", item="Axe", reason="smoke test")  # tools are never bought
+    if good:
+        raise Smoke(f"selling an Axe should fail, got: {text.splitlines()[0]}")
+    ok("close_menu")
+
+
 @case("choose_profession")
 def choose_profession():
     """#8: level-5 profession choices wait for the AI; an unmade choice gets the default at bedtime."""
@@ -638,6 +1041,64 @@ def choose_profession():
         raise Smoke("a profession choice is still pending after bedtime")
 
 
+@case("equip")
+def equip():
+    """#27: a ring goes on the left hand, bait onto the rod, and status/inventory show both. Skips if the debug API cannot make the items."""
+    reset("Farm")
+    try:
+        debug("add_item", id="(O)516")            # Small Glow Ring
+        debug("add_item", id="(T)FiberglassRod")  # a rod with bait and tackle slots
+        debug("add_item", id="(O)685", qty=10)    # Bait
+    except Smoke as e:
+        raise SkipCase(f"the debug API could not add the test items: {e}")
+
+    text = ok("equip", item="Small Glow Ring", slot="left", reason="smoke test")
+    if not text.startswith("Equipped Small Glow Ring"):
+        raise Smoke(f"expected 'Equipped Small Glow Ring', got: {text.splitlines()[0]}")
+    status = ok("status")
+    if not re.search(r"^Equipped: left ring Small Glow Ring \u00b7 right ring ", status, re.M):
+        raise Smoke(f"status does not show the ring on the left hand:\n{status}")
+    if inventory_count("Small Glow Ring") != 0:
+        raise Smoke("the equipped ring is still in the inventory")
+
+    text = ok("equip", item="Bait", reason="smoke test")
+    if not text.startswith("Attached 10 x Bait"):
+        raise Smoke(f"expected 'Attached 10 x Bait', got: {text.splitlines()[0]}")
+    inv = ok("inventory")
+    if not re.search(r"^Fishing rod .*: bait Bait x10", inv, re.M):
+        raise Smoke(f"inventory does not show the bait on the rod:\n{inv}")
+    if inventory_count("Bait") != 0:
+        raise Smoke("the attached bait is still in the inventory")
+
+
+@case("special_orders")
+def special_orders():
+    """#27: the board lists its orders and one can be accepted. Skips while the board is not open yet or offers nothing."""
+    reset("Farm")
+    if "special orders" not in ok("special_orders", action="active").lower():
+        raise Smoke("special_orders(active) did not answer about special orders")
+    good, text = call("special_orders", action="list", reason="smoke test")
+    try:
+        if not good:
+            if "no Special Orders board" in text:
+                raise SkipCase("the Special Orders board is not open yet (fall of year 1); run the gate on a later save")
+            raise Smoke(f"special_orders(list) failed: {text.splitlines()[0]}")
+        if "no orders are posted" in text:
+            raise SkipCase("the board has no orders posted")
+        indexes = re.findall(r"^index (\d+) ", text, re.M)
+        if not indexes:
+            raise Smoke(f"the board text lists no 'index N' order:\n{text}")
+        good, text = call("special_orders", action="accept", index=int(indexes[0]), reason="smoke test")
+        if not good and "not offering Accept" in text:
+            raise SkipCase("the board does not offer Accept (an order from it was already taken)")
+        if not good or not text.startswith("Accepted"):
+            raise Smoke(f"expected 'Accepted ...', got: {text.splitlines()[0]}")
+        if "no accepted special orders" in ok("special_orders", action="active"):
+            raise Smoke("the accepted order is not in special_orders(active)")
+    finally:
+        call("close_menu")
+
+
 def place_near(item_id: str) -> tuple[int, int]:
     """Place an object (debug) in the middle of a run of three free tiles near the player, so a side stays reachable."""
     for run in parse_tillable_runs(ok("look", radius=10), 3):
@@ -653,6 +1114,50 @@ def place_near(item_id: str) -> tuple[int, int]:
 def question_options() -> dict[str, int]:
     """Options of the open question dialogue, by text, from the status footer."""
     return {m.group(2).strip(): int(m.group(1)) for m in re.finditer(r"option (\d+): (.+)", ok("status"))}
+
+
+@case("wear")
+def wear():
+    """#54: wear puts a hat on from the inventory and gives the old one back; wardrobe shows it."""
+    reset("Farm")
+    try:
+        debug("add_item", id="(H)0", qty=1)  # Cowboy Hat
+    except Smoke as e:
+        raise SkipCase(f"could not add a hat through the debug API: {e}")
+    text = ok("wear", item="Cowboy Hat", reason="smoke test")
+    if "put on" not in text or "Cowboy Hat" not in ok("wardrobe"):
+        raise Smoke(f"the hat was not worn: {text.splitlines()[0]}")
+
+
+@case("search_trash")
+def search_trash():
+    """#54: search_trash presses the Garbage tile; the result says who reacted (a trash_dive event is logged)."""
+    reset("Farm")
+    ok("travel_to", location="Town", reason="smoke test")
+    good, text = call("search_trash", reason="smoke test")
+    if not good:
+        raise SkipCase(f"no reachable trash can: {text.splitlines()[0]}")
+    if "trash can" not in text or ("saw you" not in text and "No villager reacted" not in text):
+        raise Smoke(f"unexpected search_trash result: {text.splitlines()[0]}")
+
+
+@case("mount")
+def mount():
+    """#54: mount with a horse gets on, dismount gets off; without a stable it says so."""
+    reset("Farm")
+    good, text = call("mount", reason="smoke test")
+    if not good:
+        if "no horse" in text.lower() or "Stable" in text:
+            raise SkipCase("this save has no horse (build a Stable with #10 first)")
+        raise Smoke(f"mount failed: {text.splitlines()[0]}")
+    if "riding" not in text and "naming" not in text:
+        raise Smoke(f"mount gave: {text.splitlines()[0]}")
+    ok("dismount", reason="smoke test")
+
+
+@case("night_events", skip="night events are random and play while asleep; check the next morning's go_to_bed result for an 'Overnight:' line")
+def night_events():
+    pass
 
 
 @case("totem")
@@ -719,6 +1224,261 @@ def chest():
         call("close_menu")
 
 
+@case("craft")
+def craft():
+    """craft() lists the known recipes; craft(recipe, quantity) goes through CraftingRecipe: ingredients used, items arrive."""
+    reset("Farm")
+    debug("add_item", id="(O)388", qty=100)  # Wood
+    debug("add_item", id="(O)390", qty=50)  # Stone
+    listing = ok("craft")
+    if "Craftable now:" not in listing or "Missing ingredients:" not in listing:
+        raise Smoke(f"craft() does not list recipes:\n{listing[:400]}")
+    if call("craft", recipe="Not A Real Recipe", reason="smoke test")[0]:
+        raise Smoke("craft accepted a recipe the player does not know")
+    ready = re.findall(r"^  (.+?)(?: \(makes (\d+)\))?: .*\[you can craft (\d+)\]$", listing, re.M)
+    if not ready:
+        raise SkipCase("no known recipe can be crafted with 100 Wood and 50 Stone")
+    names = [r[0] for r in ready]
+    name = next((n for n in ("Wood Fence", "Chest", "Torch", "Wood Path", "Stone Fence") if n in names), names[0])
+    text = ok("craft", recipe=name, quantity=1, reason="smoke test")
+    if not text.startswith("Crafted 1x") or not re.search(r"\+\d+", text) or not re.search(r"-\d+", text):
+        raise Smoke(f"craft {name} did not show an item gained and ingredients used: {text.splitlines()[0]}")
+
+
+@case("place")
+def place():
+    """place puts items on free ground through Utility.tryToPlaceItem and says why a tile did not work."""
+    reset("Farm")
+    debug("add_item", id="(BC)130")  # Chest
+    debug("add_item", id="(BC)130")  # a second one, for the occupied-tile check
+    debug("add_item", id="(BC)13")  # Furnace
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 free tiles near the player")
+    left, _, right = runs[0]
+    text = ok("place", item="Chest", tiles=[left], reason="smoke test")
+    if not text.startswith("Placed 1/1"):
+        raise Smoke(f"chest was not placed: {text.splitlines()[0]}")
+    text = ok("place", item="Furnace", tiles=[right], reason="smoke test")
+    if not text.startswith("Placed 1/1"):
+        raise Smoke(f"furnace was not placed: {text.splitlines()[0]}")
+    things = {pt: label for label, pts in parse_things(ok("look", radius=10), "O") for pt in pts}
+    if not things.get(tuple(left), "").startswith("Chest") or not things.get(tuple(right), "").startswith("Furnace"):
+        raise Smoke(f"look does not show the placed items at {left} and {right}: {things}")
+    good, text = call("place", item="Chest", tiles=[left], reason="smoke test")
+    if good or "already has" not in text:
+        raise Smoke(f"placing on an occupied tile should fail with 'already has': {text.splitlines()[0]}")
+
+
+def tool_count() -> int:
+    return sum("[tool" in line for line in ok("inventory").splitlines())
+
+
+@case("chest_tool")
+def chest_tool():
+    """chest walks to a chest and stores/takes by name and quality, in one call, through menu take/put."""
+    reset("Farm")
+    if inventory_stacks("Cauliflower"):
+        raise SkipCase("the pack already holds Cauliflower; the case counts exact stacks")
+    debug("add_item", id="(O)190", qty=5)  # Cauliflower (normal)
+    debug("add_item", id="(O)190", qty=3, quality=2)  # Cauliflower (gold)
+    debug("add_item", id="(O)472", qty=3)  # Parsnip Seeds, which "everything" keeps
+    if inventory_stacks("Cauliflower") != {"normal": 5, "gold": 3}:
+        raise Smoke(f"setup: expected 5 normal and 3 gold Cauliflower, the inventory shows {inventory_stacks('Cauliflower')}")
+    seeds, tools = inventory_count("Parsnip Seeds"), tool_count()
+    x, y = place_near("(BC)130")  # Chest
+    at = {"x": x, "y": y, "reason": "smoke test"}
+    try:
+        if call("chest", action="list", reason="smoke test")[0]:
+            raise Smoke("chest without a tile and without an open chest menu should fail")
+        text = ok("chest", action="store", item="Cauliflower", quality="gold", **at)
+        if "Stored 3x Cauliflower (gold)" not in text or inventory_stacks("Cauliflower") != {"normal": 5}:
+            raise Smoke(f"storing only the gold Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="list", **at)
+        if "3x Cauliflower (gold)" not in text:
+            raise Smoke(f"list does not show the gold Cauliflower:\n{text}")
+        text = ok("chest", action="store", items=["Cauliflower"], **at)
+        if "5x Cauliflower (normal)" not in text or inventory_stacks("Cauliflower"):
+            raise Smoke(f"storing the rest of the Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="take", item="Cauliflower", quality="gold", quantity=2, **at)
+        if "Took 2x Cauliflower (gold)" not in text or inventory_stacks("Cauliflower") != {"gold": 2}:
+            raise Smoke(f"taking 2 gold Cauliflower went wrong:\n{text}")
+        text = ok("chest", action="store", item="everything", **at)
+        if tool_count() != tools or inventory_count("Parsnip Seeds") != seeds:
+            raise Smoke(f"store everything must keep tools and seeds:\n{text}")
+        text = ok("chest", action="take", item="everything", **at)
+        if inventory_stacks("Cauliflower") != {"normal": 5, "gold": 3}:
+            raise Smoke(f"take everything did not bring every Cauliflower back:\n{text}")
+        if "Menu open" in ok("status"):
+            raise Smoke("the chest tool left a menu open")
+    finally:
+        call("close_menu")
+
+
+@case("craft_place_chest")
+def craft_place_chest():
+    """craft a Chest, place it, then use it: the whole new-tool chain on one item."""
+    reset("Farm")
+    debug("add_item", id="(O)388", qty=120)  # Wood
+    if "Chest" not in ok("craft"):
+        raise SkipCase("this player does not know the Chest recipe")
+    chests = inventory_count("Chest")
+    text = ok("craft", recipe="Chest", quantity=99, reason="smoke test")
+    if not text.startswith("Crafted") or "Stopped after" not in text:
+        raise Smoke(f"crafting 99 chests should make a few and stop on ingredients: {text.splitlines()[0]}")
+    if inventory_count("Chest") <= chests:
+        raise Smoke("no Chest item arrived")
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 free tiles near the player")
+    x, y = runs[0][1]
+    ok("place", item="Chest", tiles=[[x, y]], reason="smoke test")
+    debug("add_item", id="(O)24", qty=2)  # Parsnip
+    ok("chest", x=x, y=y, action="store", item="Parsnip", reason="smoke test")
+    if inventory_count("Parsnip") != 0:
+        raise Smoke("the crafted and placed chest did not take the Parsnips")
+
+
+@case("cook")
+def cook():
+    """cook() lists the cooking recipes; cook(recipe, quantity) makes dishes in the farmhouse kitchen (CraftingRecipe, cooking)."""
+    reset("Farm")
+    ok("travel_to", location="FarmHouse", reason="smoke test")
+    listing = ok("cook")
+    if "Cooking recipes you know" not in listing or "Cookable now:" not in listing:
+        raise Smoke(f"cook() does not list the cooking recipes:\n{listing[:400]}")
+    if call("cook", recipe="Not A Real Dish", reason="smoke test")[0]:
+        raise Smoke("cook accepted a recipe the player does not know")
+    if "Fried Egg" not in listing:
+        raise SkipCase("this player does not know Fried Egg")
+    debug("add_item", id="(O)176", qty=4)  # Egg
+    eggs, dishes = inventory_count("Egg"), inventory_count("Fried Egg")
+    good, text = call("cook", recipe="Fried Egg", quantity=2, reason="smoke test")
+    if not good and "no kitchen" in text:
+        raise SkipCase("the farmhouse has no kitchen yet (house upgrade 1)")
+    if not good or not text.startswith("Cooked 2x Fried Egg"):
+        raise Smoke(f"cook Fried Egg x2 failed: {text.splitlines()[0]}")
+    if inventory_count("Fried Egg") != dishes + 2 or inventory_count("Egg") != eggs - 2:
+        raise Smoke(f"expected +2 Fried Egg and -2 Egg: {text.splitlines()[0]}")
+    good, text = call("cook", recipe="Fried Egg", quantity=99, reason="smoke test")
+    if not good or "Stopped after" not in text:
+        raise Smoke(f"cooking 99 should cook what the eggs allow and stop on ingredients: {text.splitlines()[0]}")
+    ok("eat", item="Fried Egg", reason="smoke test")
+
+
+@case("quests")
+def quests():
+    """quests lists the journal and the Help Wanted board; share=true posts the journal to the plan board."""
+    reset("Farm")
+    text = ok("quests")
+    if "Your journal (" not in text or "Help Wanted board (Town)" not in text:
+        raise Smoke(f"quests does not show the journal and the board:\n{text[:500]}")
+    section = None
+    try:
+        text = ok("quests", share=True)
+        m = re.search(r'Posted to the plan board, section "(.+?)"', text)
+        if not m:
+            raise Smoke(f"share=true did not post to the plan board:\n{text[-300:]}")
+        section = m.group(1)
+        if section not in ok("plan_read"):
+            raise Smoke(f"plan_read does not show the section {section!r}")
+    finally:
+        if section:
+            call("plan_edit", section=section, text="")
+
+
+@case("accept_quest")
+def accept_quest():
+    """accept_quest walks to the Town board and presses Accept; the request then shows in the journal as taken by you."""
+    reset("Farm")
+    board = parse_board(ok("quests"))
+    if board is None:
+        raise SkipCase("no Help Wanted request is posted today")
+    if board["state"] != "free":
+        raise SkipCase(f"today's request is already {board['state']} ({board['by'] or 'you'})")
+    text = ok("accept_quest", reason="smoke test")
+    if not text.startswith("Accepted"):
+        raise Smoke(f"accept_quest did not accept: {text.splitlines()[0]}")
+    after = ok("quests")
+    if not any(e["type"] == "Help Wanted" and e["name"] == board["name"] for e in parse_journal(after)):
+        raise Smoke(f"the journal does not list {board['name']!r} after accepting:\n{after[:500]}")
+    again = parse_board(after)
+    if again is None or again["state"] != "mine":
+        raise Smoke(f"the board should say you took it: {again}")
+    if "already took" not in ok("accept_quest", reason="smoke test"):
+        raise Smoke("a second accept_quest should say you already took it")
+
+
+@case("crack_geode")
+def crack_geode():
+    """crack_geode pays Clint 25g and draws the treasure; it refuses away from the Blacksmith and without money."""
+    reset("Farm")
+    debug("add_item", id="(O)535", qty=3)  # Geode
+    geodes = inventory_count("Geode")
+    if f"{geodes}x Geode" not in ok("crack_geode"):
+        raise Smoke("crack_geode() does not list the geodes in the pack")
+    good, text = call("crack_geode", item="Geode", reason="smoke test")
+    if good or "Blacksmith" not in text:
+        raise Smoke(f"cracking away from the Blacksmith should fail naming it: {text.splitlines()[0]}")
+    debug("set_time", time=1000)
+    good, text = call("travel_to", location="Blacksmith", reason="smoke test")
+    if not good:
+        raise SkipCase(f"the Blacksmith is not reachable today: {text.splitlines()[0]}")
+    good, text = call("crack_geode", item="Geode", quantity=2, reason="smoke test")
+    if not good and "Clint is not here" in text:
+        raise SkipCase("Clint is not in the Blacksmith at this time")
+    if not good or not text.startswith("Clint cracked 2x Geode for 50g"):
+        raise Smoke(f"crack_geode x2 failed: {text.splitlines()[0]}")
+    if inventory_count("Geode") != geodes - 2 or parse_money_left(text) != 1950:
+        raise Smoke(f"expected 2 geodes used and 1950g left: {text.splitlines()[0]}")
+    debug("set_money", n=10)
+    good, text = call("crack_geode", item="Geode", reason="smoke test")
+    if good or "not enough money" not in text:
+        raise Smoke(f"cracking without money should fail: {text.splitlines()[0]}")
+
+
+@case("trash")
+def trash():
+    """trash removes items, never tools, and wants confirm=true for valuables (gold quality)."""
+    reset("Farm")
+    debug("add_item", id="(O)168", qty=5)  # Trash
+    junk = inventory_count("Trash")
+    text = ok("trash", item="Trash", quantity=2, reason="smoke test")
+    if not text.startswith("Trashed 2x Trash") or inventory_count("Trash") != junk - 2:
+        raise Smoke(f"trashing 2 Trash went wrong: {text.splitlines()[0]}")
+    good, text = call("trash", item="Axe", confirm=True, reason="smoke test")
+    if good or "tool" not in text or tool_count() == 0:
+        raise Smoke(f"a tool must never be trashed, even with confirm: {text.splitlines()[0]}")
+    if inventory_stacks("Cauliflower"):
+        raise SkipCase("the pack already holds Cauliflower; the case counts exact stacks")
+    debug("add_item", id="(O)190", qty=1, quality=2)  # Cauliflower (gold)
+    good, text = call("trash", item="Cauliflower", quality="gold", reason="smoke test")
+    if good or "confirm=true" not in text or inventory_stacks("Cauliflower") != {"gold": 1}:
+        raise Smoke(f"gold quality should need confirm and stay in the pack: {text.splitlines()[0]}")
+    text = ok("trash", item="Cauliflower", quality="gold", confirm=True, reason="smoke test")
+    if not text.startswith("Trashed 1x Cauliflower") or inventory_stacks("Cauliflower"):
+        raise Smoke(f"confirmed trash did not remove the Cauliflower: {text.splitlines()[0]}")
+
+
+@case("watch_tv")
+def watch_tv():
+    """watch_tv lists the channels, then watches one and reads the text the TV showed."""
+    reset("Farm")
+    ok("travel_to", location="FarmHouse", reason="smoke test")
+    good, text = call("watch_tv", reason="smoke test")
+    if not good and "no TV" in text:
+        raise SkipCase("the farmhouse has no TV")
+    if not good or "Channels on the TV right now" not in text:
+        raise Smoke(f"watch_tv() did not list the channels: {text.splitlines()[0]}")
+    if "Menu open" in ok("status"):
+        raise Smoke("listing the channels left the TV question open")
+    text = ok("watch_tv", channel="weather", reason="smoke test")
+    if not text.startswith("Watched") or '"' not in text:
+        raise Smoke(f"watching the weather channel showed no text: {text.splitlines()[0]}")
+    if "Menu open" in ok("status"):
+        raise Smoke("watch_tv left a dialogue open")
+
+
 @case("mine_elevator")
 def mine_elevator():
     """The MineElevator tile opens MineElevatorMenu; menu choose rides to a floor and back."""
@@ -744,6 +1504,269 @@ def mine_elevator():
         text = ok("menu", action="choose", option="0", reason="smoke test")
         if "(Mine)" not in text:
             raise Smoke(f"choose 0 did not ride back to the entrance: {text.splitlines()[0]}")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("fish")
+def fish():
+    """fish refuses without a rod and late at night; with a rod on the Beach it walks to the shore and casts."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    try:
+        if inventory_count("Bamboo Pole") == 0:
+            good, text = call("fish", tries=1, reason="smoke test")
+            if good or "[no_rod]" not in text:
+                raise Smoke(f"fish without a rod should fail with [no_rod]: {text.splitlines()[0]}")
+            debug("add_item", id="(T)BambooPole", qty=1)
+        ok("travel_to", location="Beach", reason="smoke test")
+        text = ok("fish", tries=2, reason="smoke test")
+        if "Cast 1/2" not in text:
+            raise Smoke(f"fish did not report a first cast:\n{text}")
+        debug("set_time", time=2450)
+        good, text = call("fish", tries=1, reason="smoke test")
+        if good or "[too_late]" not in text:
+            raise Smoke(f"fish after 00:30 should fail with [too_late]: {text.splitlines()[0]}")
+    finally:
+        call("close_menu")
+        debug("set_time", time=900)
+        debug("warp", location="Farm", x=x, y=y)
+
+
+# The warp tiles below are the usual door-side tiles of each interior; adjust them if a save puts you in a wall.
+CC_TILE = (32, 22)
+MUSEUM_TILE = (3, 9)
+
+
+def bundle_line(text: str, name: str) -> tuple[str, int, int] | None:
+    """(whole line, filled, required) of an unfinished bundle in `bundles` output, e.g. '[0] Spring Crops 1/4 → ...'."""
+    for line in text.splitlines():
+        m = re.match(rf"\s*\[\d+\] {re.escape(name)} (\d+)/(\d+)", line)
+        if m:
+            return line, int(m.group(1)), int(m.group(2))
+    return None
+
+
+@case("bundles")
+def bundles():
+    """bundles reads the Community Center (needs its door unlocked; the data itself exists from day 1)."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="CommunityCenter", x=CC_TILE[0], y=CC_TILE[1])
+    try:
+        good, text = call("bundles")
+        if not good:
+            raise SkipCase(f"bundles are closed on this save: {text.splitlines()[0]}")
+        for room in ("Pantry", "Crafts Room", "Fish Tank", "Boiler Room", "Vault", "Bulletin Board"):
+            if f"== {room}:" not in text:
+                raise Smoke(f"bundles does not list the {room}:\n{text[:600]}")
+        if "Spring Crops" not in text:
+            raise Smoke(f"bundles does not list the Spring Crops bundle:\n{text[:600]}")
+        good, text = call("bundles", room="Pantry")
+        if not good or "== Crafts Room" in text or "Spring Crops" not in text:
+            raise Smoke(f"bundles(room=Pantry) should list only the Pantry:\n{text[:600]}")
+        if call("bundles", room="Nowhere")[0]:
+            raise Smoke("bundles accepted an unknown room")
+    finally:
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("bundle_donate")
+def bundle_donate():
+    """donate_bundle opens the Pantry's note, drops a Parsnip into Spring Crops and leaves the menu closed."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="CommunityCenter", x=CC_TILE[0], y=CC_TILE[1])
+    try:
+        good, text = call("bundles", room="Pantry")
+        if not good:
+            raise SkipCase(f"bundles are closed on this save: {text.splitlines()[0]}")
+        if "can't read Junimo script" in text:
+            raise SkipCase("the Wizard has not taught this farmer Junimo script yet; run the gate on a later save")
+        line = bundle_line(text, "Spring Crops")
+        if line is None:
+            raise SkipCase("the Spring Crops bundle is already complete on this save")
+        _, filled, required = line
+        if "Parsnip" not in line[0].split("needs", 1)[-1]:
+            raise SkipCase("a Parsnip is already in the Spring Crops bundle")
+        have = inventory_count("Parsnip")
+        debug("add_item", id="(O)24", qty=1)  # Parsnip
+        text = ok("donate_bundle", item="Parsnip", bundle="Spring Crops", reason="smoke test")
+        if f"{filled + 1}/{required}" not in text:
+            raise Smoke(f"expected Spring Crops at {filled + 1}/{required}: {text.splitlines()[0]}")
+        if call("menu")[0]:
+            raise Smoke("a menu was left open after donate_bundle")
+        if inventory_count("Parsnip") != have:
+            raise Smoke(f"the donated Parsnip should be gone; have {inventory_count('Parsnip')}, expected {have}")
+        after = bundle_line(ok("bundles", room="Pantry"), "Spring Crops")
+        if after is not None and after[1] != filled + 1:
+            raise Smoke(f"bundles shows {after[1]} filled after the donation, expected {filled + 1}")
+        if have == 0 and call("donate_bundle", item="Parsnip", bundle="Spring Crops", reason="smoke test")[0]:
+            raise Smoke("donating a Parsnip that is not in the inventory succeeded")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("museum")
+def museum():
+    """museum list shows an artifact the Museum accepts; donate puts it on display and it stops being offered."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    debug("warp", location="ArchaeologyHouse", x=MUSEUM_TILE[0], y=MUSEUM_TILE[1])
+    try:
+        debug("add_item", id="(O)96", qty=1)  # Dwarf Scroll I
+        text = ok("museum")
+        if "Dwarf Scroll I" not in text:
+            raise SkipCase("the Museum already displays a Dwarf Scroll I on this save")
+        have = inventory_count("Dwarf Scroll I")
+        text = ok("museum", action="donate", item="Dwarf Scroll I", reason="smoke test")
+        if "Donated to the Museum: Dwarf Scroll I" not in text:
+            raise Smoke(f"donate did not report the piece: {text.splitlines()[0]}")
+        if inventory_count("Dwarf Scroll I") != have - 1:
+            raise Smoke("the donated Dwarf Scroll I is still in the inventory")
+        if "Dwarf Scroll I" in ok("museum", action="list"):
+            raise Smoke("the Museum still offers a piece that is already on display")
+        if have == 1 and call("museum", action="donate", item="Dwarf Scroll I", reason="smoke test")[0]:
+            raise Smoke("donating a Dwarf Scroll I that is not in the inventory succeeded")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+# The Joja route (#26). joja_membership is irreversible for the farm, which is fine here: it only ever happens on the
+# smoke_* copy, and the original save is reloaded afterwards. It runs before joja_buy_project, which needs the membership.
+JOJA_MEMBERSHIP_PRICE = 5000
+JOJA_PROJECTS = {"Bus Repair": 40000, "Minecarts": 15000, "Bridge Repair": 25000, "Greenhouse": 35000, "Panning": 20000}
+
+
+def joja_is_member(projects_text: str) -> bool:
+    m = re.search(r"Joja membership: (not bought|bought)", projects_text)
+    if not m:
+        raise Smoke(f"joja projects does not say whether the membership is bought:\n{projects_text[:400]}")
+    return m.group(1) == "bought"
+
+
+def joja_line(projects_text: str, name: str) -> str:
+    for line in projects_text.splitlines():
+        if line.strip().startswith(f"{name} ("):
+            return line
+    raise Smoke(f"joja projects does not list {name}:\n{projects_text[:600]}")
+
+
+def reach_joja_mart() -> None:
+    good, text = call("travel_to", location="JojaMart", reason="smoke test setup")
+    if not good:
+        raise SkipCase(f"cannot reach the JojaMart now: {text.splitlines()[0][:160]}")
+
+
+@case("joja_info")
+def joja_info():
+    """joja projects lists the five projects with their prices; membership without confirm buys nothing and warns."""
+    reset("Farm")
+    text = ok("joja", action="projects")
+    for name, price in JOJA_PROJECTS.items():
+        if not re.search(rf"{re.escape(name)} \(\w+\): {price:,}g,", joja_line(text, name)):
+            raise Smoke(f"{name} should cost {price:,}g:\n{joja_line(text, name)}")
+    listed = re.findall(r"^\s+[A-Z][\w ]+ \(\w+\): [\d,]+g, ", text, re.M)
+    if len(listed) != 5:
+        raise Smoke(f"joja projects should list 5 projects, found {len(listed)}:\n{text[:600]}")
+    if joja_is_member(text):
+        raise SkipCase("this save already has the Joja membership")
+
+    money = fresh_state().get("money")
+    for args in ({"action": "membership"}, {"action": "membership", "confirm": False}):
+        good, warning = call("joja", **args)
+        if not good and "already complete" in warning:
+            raise SkipCase("the Community Center is already complete on this save")
+        if not good or "NOT BOUGHT" not in warning or "Community Center" not in warning or "LOST" not in warning:
+            raise Smoke(f"membership without confirm should only warn ({args}): {warning[:300]}")
+    if fresh_state().get("money") != money:
+        raise Smoke("membership without confirm changed the wallet")
+    if joja_is_member(ok("joja", action="projects")):
+        raise Smoke("membership without confirm bought the membership")
+    good, text = call("joja", action="buy_project", project="Minecarts", reason="smoke test")
+    if good or "membership" not in text:
+        raise Smoke(f"buy_project should need the membership first: {text[:200]}")
+    if call("joja", action="buy_project", project="Nonsense", reason="smoke test")[0]:
+        raise Smoke("buy_project accepted an unknown project")
+
+
+@case("joja_membership")
+def joja_membership():
+    """joja membership with confirm=true: Morris sells it, 5,000g leave the wallet, the bundles close for everyone, it is announced."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    if joja_is_member(ok("joja", action="projects")):
+        raise SkipCase("this save already has the Joja membership")
+    good, text = call("joja", action="membership")
+    if not good:
+        raise SkipCase(f"the membership is not available on this save: {text.splitlines()[0][:160]}")
+    reach_joja_mart()
+    try:
+        debug("set_money", n=60000)
+        good, text = call("joja", action="membership", confirm=True, reason="smoke test")
+        if not good:
+            raise Smoke(f"membership with confirm failed: {text[:400]}")
+        if "bought the Joja membership" not in text:
+            raise Smoke(f"membership did not report the purchase: {text[:300]}")
+        if fresh_state().get("money") != 60000 - JOJA_MEMBERSHIP_PRICE:
+            raise Smoke(f"the membership should cost {JOJA_MEMBERSHIP_PRICE}g; money is {fresh_state().get('money')}, was 60000")
+        if call("menu")[0]:
+            raise Smoke("a menu was left open after the membership")
+        if not joja_is_member(ok("joja", action="projects")):
+            raise Smoke("projects does not show the membership after buying it")
+        good, text = call("bundles")
+        if good or "Joja" not in text:
+            raise Smoke(f"the bundles should be closed after the membership: {text[:200]}")
+        if call("joja", action="membership", confirm=True, reason="smoke test")[0]:
+            raise Smoke("a second membership was sold")
+        board = ok("plan_read")
+        if "Community Center vs Joja" not in board or "Joja membership" not in board:
+            raise Smoke(f"the plan board has no decision section:\n{board[:500]}")
+        feed = _request("/api/feed")["entries"]
+        if not any(e.get("kind") == "joja_membership" for e in feed):
+            raise Smoke("the feed has no joja_membership event")
+        if not any(e.get("kind") == "system" and "DECISION" in (e.get("text") or "") for e in feed):
+            raise Smoke("the feed has no DECISION line")
+    finally:
+        call("close_menu")
+        debug("warp", location="Farm", x=x, y=y)
+
+
+@case("joja_buy_project")
+def joja_buy_project():
+    """buy_project pays the Minecarts through the game's own Joja form: 15,000g leave the wallet and the project shows as bought."""
+    reset("Farm")
+    _, x, y = p1_tile()
+    text = ok("joja", action="projects")
+    if not joja_is_member(text):
+        raise SkipCase("needs the Joja membership (joja_membership buys it earlier in the same run)")
+    if not joja_line(text, "Minecarts").rstrip().endswith("available."):
+        raise SkipCase(f"the Minecarts are not open for purchase on this save: {joja_line(text, 'Minecarts').strip()[-60:]}")
+    reach_joja_mart()
+    try:
+        debug("set_money", n=20000)
+        text = ok("joja", action="buy_project", project="Minecarts", reason="smoke test")
+        if "Minecarts" not in text or "15,000g" not in text:
+            raise Smoke(f"buy_project did not report the Minecarts and the price: {text[:300]}")
+        if fresh_state().get("money") != 20000 - JOJA_PROJECTS["Minecarts"]:
+            raise Smoke(f"Minecarts should cost 15,000g; money is {fresh_state().get('money')}, was 20000")
+        if call("menu")[0]:
+            raise Smoke("the Joja form was left open after buy_project")
+        line = joja_line(ok("joja", action="projects"), "Minecarts").rstrip()
+        if not (line.endswith("bought, built tomorrow.") or line.endswith("built.")):
+            raise Smoke(f"projects does not show the Minecarts as bought:\n{line}")
+        if call("joja", action="buy_project", project="Minecarts", reason="smoke test")[0]:
+            raise Smoke("the Minecarts were sold twice")
+        debug("set_money", n=100)
+        good, text = call("joja", action="buy_project", project="Panning", reason="smoke test")
+        if good or "100g" not in text:
+            raise Smoke(f"buy_project with too little gold should fail and say so: {text[:200]}")
+        feed = _request("/api/feed")["entries"]
+        if not any(e.get("kind") == "joja_project_bought" for e in feed):
+            raise Smoke("the feed has no joja_project_bought event")
     finally:
         call("close_menu")
         debug("warp", location="Farm", x=x, y=y)
@@ -1190,7 +2213,484 @@ def send_money():
         call("close_menu")
 
 
-CASES.append(Case("clint_pickup", lambda: None, skip="needs the tool upgrade flow (#2)"))
+@case("caught_slacking")
+@social
+def caught_slacking():
+    """
+    p2 says and writes on the plan board that it is watering, then stands in a long wait. p1's look shows what p2 is
+    actually doing next to those claims. A plain say leaves the wait alone; an @mention stops it and hands p2 the message.
+    """
+    reset("Farm")
+    loc, px, py = p1_tile()
+    unfreeze()
+    debug_seat("p2", "warp", location=loc, x=px + 2, y=py)
+    ok_seat("p2", "plan_edit", section="Smoke work", text="p2 waters the parsnips all morning")
+    ok_seat("p2", "say", text="SLACK1 off to water the parsnips")
+
+    outcome: dict = {}
+
+    def nap() -> None:
+        try:
+            outcome["call"] = call_seat("p2", "wait", {"minutes": 120, "reason": "smoke test: napping"})
+        except Exception as e:  # reported on the main thread
+            outcome["error"] = e
+
+    napper = threading.Thread(target=nap, daemon=True)
+    try:
+        debug("perception", interrupts=1, clear=1)  # p2 arriving next to p1 was news; only what happens from now on counts
+        napper.start()
+
+        look, t0 = "", time.time()
+        while time.time() - t0 < 10 and "wait 120 min" not in look:
+            look = ok_seat("p1", "look", radius=12)
+            time.sleep(0.4)
+        line = next((ln for ln in look.splitlines() if "(p2)" in ln and "Actually doing" in ln), "")
+        if "Other players in view" not in look or not line:
+            raise Smoke(f"p1's look does not list p2 with what it is doing:\n{look[-600:]}")
+        for needle, what in (("wait 120 min (standing still)", "the running tool"), ("napping", "its reason"),
+                             ("SLACK1 off to water", "its last say"), ("waters the parsnips all morning", "its plan board section")):
+            if needle not in line:
+                raise Smoke(f"the line about p2 lacks {what} ({needle}):\n{line}")
+        if "Other players in view" not in ok_seat("p1", "status"):
+            raise Smoke("status does not list the players in view")
+
+        ok_seat("p1", "say", text="SLACK2 hello there")
+        time.sleep(1.5)
+        if not napper.is_alive():
+            raise Smoke(f"a say without @ stopped p2's wait: {outcome}")
+
+        ok_seat("p1", "say", text="@p2 SLACK3 I can see you napping")
+        napper.join(15)
+        if napper.is_alive():
+            raise Smoke("p2's wait did not stop when p1 mentioned it with @p2")
+        if "error" in outcome:
+            raise Smoke(f"p2's wait call failed: {outcome['error']}")
+        good, text = outcome["call"]
+        if not good or "Interrupted" not in text or "wait" not in text or "mentioned you" not in text:
+            raise Smoke(f"p2's wait should end with an Interrupted result naming the mention:\n{text}")
+        if "SLACK3" not in text:
+            raise Smoke(f"the interrupted result lacks the message that caused it:\n{text}")
+        if "Waited until" in text:
+            raise Smoke("the wait ran to its end instead of being interrupted")
+    finally:
+        try:
+            if napper.is_alive():
+                ok_seat("p1", "say", text="@p2 smoke test over")  # interrupts are still on: this ends the wait
+                napper.join(10)
+        except Exception:
+            pass
+        debug("perception", interrupts=0, clear=1)
+        try:
+            ok_seat("p2", "plan_edit", section="Smoke work", text="")
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------- romance and naming (#53)
+
+
+def feed_events(kind_tool: str) -> list[dict]:
+    """Story events (kind "event", the type in `tool`) of the overlay feed."""
+    return [e for e in _request("/api/feed?after=0")["entries"] if e.get("kind") == "event" and e.get("tool") == kind_tool]
+
+
+@case("naming")
+def naming():
+    """A naming box is answered with name(text); an unanswered one gets a random name (what go_to_bed does)."""
+    reset("Farm")
+    good, text = call("name", text="Whoever")
+    if good or "No naming box" not in text:
+        raise Smoke(f"name without a box should fail with 'No naming box', got: {text.splitlines()[0]}")
+    debug("open_naming", title="Name your smoke calf:")
+    try:
+        status = ok("status")
+        if "Naming:" not in status or "name(text)" not in status:
+            raise Smoke(f"status has no Naming: line while a naming box is open:\n{status[:400]}")
+        if call("name", text="x" * 25)[0]:
+            raise Smoke("name accepted 25 characters")
+        if call("name", text="   ")[0]:
+            raise Smoke("name accepted an empty name")
+        ok("name", text="Smokey")
+        got = debug("last_named")
+        if got != "Smokey":
+            raise Smoke(f"the box's doneNaming got {got!r}, expected 'Smokey'")
+        if "Naming:" in ok("status"):
+            raise Smoke("status still shows Naming: after the box was answered")
+        named = [e for e in feed_events("named") if (e.get("args") or {}).get("name") == "Smokey"]
+        if not named or (named[-1].get("args") or {}).get("player") != "p1":
+            raise Smoke("the feed has no 'named' event (what, name, player) for Smokey")
+
+        # Nobody answers: bedtime picks a random name.
+        debug("open_naming", title="Name your smoke pup:")
+        random_name = debug("resolve_naming").strip()
+        if random_name in ("", "(none)"):
+            raise Smoke("resolve_naming left the box without a name")
+        if "Naming:" in ok("status"):
+            raise Smoke("status still shows Naming: after the random name")
+        auto = [e for e in feed_events("named") if (e.get("args") or {}).get("chosen") is False]
+        if not auto:
+            raise Smoke("the feed has no 'named' event for the random name (chosen=false)")
+    finally:
+        call("close_menu")
+
+
+@case("bouquet_dating")
+def bouquet_dating():
+    """villagers shows the romance requirements; bouquet refuses what the game refuses, then starts dating at 8 hearts."""
+    reset("Farm")
+    detail = ok("villagers", name="Abigail")
+    if "Romance:" not in detail:
+        raise Smoke(f"villagers(name=Abigail) has no Romance: line:\n{detail[:300]}")
+    good, text = call("bouquet", name="Pierre", reason="smoke test")
+    if good or "can't be dated" not in text:
+        raise Smoke(f"bouquet for a villager who can't be dated should say so, got: {text.splitlines()[0]}")
+    if call("bouquet", name="Nobody Here", reason="smoke test")[0]:
+        raise Smoke("bouquet accepted an unknown name")
+    if call("mermaid_pendant", name="Abigail", reason="smoke test")[0]:
+        raise Smoke("mermaid_pendant worked before dating")
+
+    if "dating Abigail" in detail or "engaged to Abigail" in detail or "married to Abigail" in detail:
+        raise SkipCase("Abigail is already dating or married on this save; pick a fresh smoke copy")
+    try:
+        debug("set_friendship", npc="Abigail", points=250)
+        if "can date" not in ok("villagers"):
+            raise Smoke("the villagers roster marks nobody as 'can date' although Abigail is met")
+        good, text = call("bouquet", name="Abigail", reason="smoke test")
+        if good or "hearts" not in text:
+            raise Smoke(f"bouquet at 1 heart should be refused with the hearts needed, got: {text.splitlines()[0]}")
+        debug("set_friendship", npc="Abigail", points=2000)
+        debug("add_item", id="(O)458", qty=1)  # Bouquet
+    except Smoke as e:
+        raise SkipCase(f"cannot set up 8 hearts and a Bouquet through the debug API: {e}")
+
+    text = ok("bouquet", name="Abigail", reason="smoke test")
+    if "now dating Abigail" not in text:
+        raise Smoke(f"expected dating to start, got: {text[:300]}")
+    if "dating" not in ok("villagers", name="Abigail").lower():
+        raise Smoke("villagers does not show that you are dating Abigail")
+    t0 = time.time()
+    while time.time() - t0 < 4 and not feed_events("bouquet_given"):
+        time.sleep(0.3)
+    if not feed_events("bouquet_given") and not feed_events("dating_started"):
+        raise Smoke("the feed has neither a bouquet_given nor a dating_started event")
+
+
+@case("propose_player")
+@social
+def propose_player():
+    """A player proposes to another: the other sees a Yes/No box, is told in the next result and answers with answer_proposal."""
+    import threading
+
+    reset("Farm")
+    if call_seat("p1", "propose", {"to": "p1", "reason": "smoke test"})[0]:
+        raise Smoke("propose accepted the player itself")
+    unfreeze()  # a connected idle seat would hold the world still, and with it p1's walk
+    loc, x, y = p1_tile()
+    try:
+        debug_seat("p2", "warp", location=loc, x=x + 1, y=y)
+        debug("add_item", id="(O)801", qty=1)  # Wedding Ring
+    except Smoke as e:
+        raise SkipCase(f"cannot set up the ring and the neighbour through the debug API: {e}")
+
+    result: list[tuple[bool, str]] = []
+
+    def propose():
+        try:
+            result.append(call_seat("p1", "propose", {"to": "p2", "reason": "smoke test"}))
+        except Exception as e:  # reported below, from the main thread
+            result.append((False, f"{type(e).__name__}: {e}"))
+
+    worker = threading.Thread(target=propose, daemon=True)
+    worker.start()
+    try:
+        t0 = time.time()
+        asked = False
+        while time.time() - t0 < 60 and not asked and worker.is_alive():
+            asked = any((e.get("args") or {}).get("answer") == "asked" for e in feed_events("proposal"))
+            time.sleep(0.5)
+        if not asked:
+            worker.join(5)
+            text = result[0][1] if result else "(no answer yet)"
+            if "got no proposal" in text:
+                raise SkipCase(f"the game started no player proposal in this save: {text.splitlines()[0]}")
+            raise Smoke(f"no 'proposal' event and propose says: {text[:300]}")
+
+        told = hear("p2")
+        if "proposes" not in told or "answer_proposal" not in told:
+            raise Smoke(f"p2 was not told about the proposal in its next result:\n{told[:400]}")
+        said = ok_seat("p2", "answer_proposal", accept=False, reason="smoke test")
+        if "said no" not in said:
+            raise Smoke(f"answer_proposal(accept=false) should say so, got: {said[:200]}")
+        worker.join(30)
+        if worker.is_alive() or not result:
+            raise Smoke("p1's propose did not return after p2 answered")
+        if "said no" not in result[0][1]:
+            raise Smoke(f"p1 should be told that p2 said no, got: {result[0][1][:300]}")
+        if not [e for e in feed_events("proposal") if (e.get("args") or {}).get("answer") == "declined"]:
+            raise Smoke("the feed has no proposal event with answer=declined")
+    finally:
+        for seat in ("p1", "p2"):
+            call_seat(seat, "close_menu", {})
+
+
+# ---------------------------------------------------------------------- context control (#30)
+
+
+def mcp_initialize(query: str = "") -> None:
+    """Start a new MCP session on p1, as an MCP client does first. `?breaks=1` opts that session in to session breaks."""
+    global _rpc_id
+    _rpc_id += 1
+    msg = {"jsonrpc": "2.0", "id": _rpc_id, "method": "initialize",
+           "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "smoke", "version": "0"}}}
+    reply = _request("/mcp" + query, msg)
+    if not isinstance(reply.get("result"), dict):
+        raise Smoke(f"initialize{query}: no result in reply: {str(reply)[:200]}")
+
+
+@case("look_kinds_diff")
+def look_kinds_diff():
+    """look: smaller default window, the kinds filter on the object list, and diff mode (#30)."""
+    reset("Farm")
+    full = ok("look")
+    m = re.search(r"Showing x (\d+)-(\d+), y (\d+)-(\d+)", full)
+    if not m:
+        raise Smoke(f"look has no 'Showing x..y' line:\n{full[:300]}")
+    width, height = int(m.group(2)) - int(m.group(1)) + 1, int(m.group(4)) - int(m.group(3)) + 1
+    if width > 17 or height > 17:
+        raise Smoke(f"default look window is {width}x{height}, expected at most 17x17 (radius 8)")
+
+    only = ok("look", kinds=["debris"])
+    if "Things in view, only debris" not in only:
+        raise Smoke(f"look(kinds=['debris']) did not say it is filtered:\n{only[-400:]}")
+    listed = [mm.group(1) for mm in re.finditer(r"^\s+(\S) .+ x\d+: ", only, re.M)]
+    stray = [sym for sym in listed if sym not in "WwSLs"]
+    if stray:
+        raise Smoke(f"look(kinds=['debris']) listed other things: {stray}")
+    if "unknown kinds ignored" in only:
+        raise Smoke("'debris' was reported as an unknown kind")
+    if "unknown kinds ignored: nonsense" not in ok("look", kinds=["nonsense"]):
+        raise Smoke("an unknown kind should be named in the list heading")
+
+    # diff: till three tiles near the player, then ask for what changed
+    look = ok("look")
+    me = re.search(r"You @ \((\d+),(\d+)\)", look)
+    runs = parse_tillable_runs(look, 3)
+    if not me or not runs:
+        raise Smoke("no run of 3 tillable tiles near the farm entrance")
+    px, py = int(me.group(1)), int(me.group(2))
+    tiles = min(runs, key=lambda r: abs(r[1][0] - px) + abs(r[1][1] - py))
+    ok("use_tool", tool="Hoe", tiles=tiles, reason="smoke test")
+    diff = ok("look", diff=True)
+    if "Diff: nothing earlier to compare" in diff:
+        raise Smoke(f"look(diff=true) fell back to the full view right after a look:\n{diff[:300]}")
+    if "Changes since your last look" not in diff or ", \u2192 = x3" not in diff:
+        raise Smoke(f"expected 3 tiles changing from ',' to '=', got:\n{diff[:500]}")
+    if len(diff.splitlines()) > 12:
+        raise Smoke(f"a diff of 3 tiles should be short, got {len(diff.splitlines())} lines")
+    again = ok("look", diff=True)
+    if "No changes since your last look" not in again:
+        raise Smoke(f"a second diff straight away should report no changes, got:\n{again[:300]}")
+
+
+@case("session_break")
+def session_break():
+    """A session that opted in (`/mcp?breaks=1`) gets a 'Session break:' notice at the planned time, then actions are refused (#30)."""
+    reset("Farm")
+    call("close_menu")
+    try:
+        mcp_initialize("?breaks=1")
+        ok("status")  # first call of the new session: counters restart here, at 9:00
+        debug("set_time", time=1205)
+        text = ok("look")
+        if not re.search(r"^Session break:", text, re.M):
+            raise Smoke(f"no 'Session break:' line after passing 12:00:\n{text[-400:]}")
+        good, refused = call("use_tool", tool="Hoe", tiles=[[0, 0]], reason="smoke test: should be refused by the session break")
+        if good or not refused.startswith("Session break:"):
+            raise Smoke(f"an action after the notice should be refused, got ok={good}: {refused[:200]}")
+        ok("think", text="smoke test: plan for the rest of the day")  # the AI must still be able to write its plan
+        ok("status")
+        if len([ln for ln in ok("look").splitlines() if ln.startswith("Session break:")]) != 0:
+            raise Smoke("the notice should be given once, not on every call")
+    finally:
+        mcp_initialize()  # a new session without ?breaks=1: breaks off again for the cases after this one
+
+
+@case("run_control")
+def run_control():
+    """POST /api/control: pause holds a new call until resume; stop_now refuses calls until resume (#32)."""
+    import threading
+
+    def control(action: str) -> dict:
+        return _request("/api/control", {"action": action}, timeout=10)
+
+    reset("Farm")
+    try:
+        control("clear_stop")
+        control("pause")
+        held: dict = {}
+
+        def call_status():
+            try:
+                held["text"] = ok("status")
+            except Exception as e:  # Smoke or network: report it from the case's thread
+                held["error"] = e
+
+        t = threading.Thread(target=call_status, daemon=True)
+        t.start()
+        time.sleep(1.5)
+        if not t.is_alive():
+            raise Smoke(f"a new call was answered while paused: {held}")
+        s = fresh_state()
+        if not (s.get("paused") and s.get("frozen")):
+            raise Smoke(f"paused but /api/state says paused={s.get('paused')} frozen={s.get('frozen')}")
+        control("resume")
+        t.join(15)
+        if t.is_alive() or "error" in held:
+            raise Smoke(f"the held call did not complete after resume: {held}")
+
+        control("stop_now")
+        good, text = call("status")
+        if good or "stopped" not in text:
+            raise Smoke(f"stop_now should refuse new calls, got ok={good}: {text.splitlines()[0]}")
+        control("resume")
+        ok("status")  # resume lifts the stop_now hold too
+        control("stop_after_day")
+        if not _request("/api/control", timeout=10).get("stopAfterDay"):
+            raise Smoke("stop_after_day was not recorded")
+    finally:
+        for action in ("resume", "clear_stop"):
+            try:
+                control(action)
+            except Exception:
+                pass
+
+
+def enter_shop(location: str, owner: str, hhmm: int = 1000) -> None:
+    """Walk into a shop at `hhmm`; SkipCase when the door is locked or its owner isn't there (closed day)."""
+    debug("set_time", time=hhmm)
+    good, text = call("travel_to", location=location, reason="smoke test")
+    if not good:
+        raise SkipCase(f"{location} is not reachable now ({text.splitlines()[0][:120]})")
+    if owner not in ok("look", radius=14):
+        raise SkipCase(f"{owner} is not in {location} today (closed day)")
+
+
+@case("ranch_build")
+def ranch_build():
+    """#10: build list, free-spot suggestions, an order Robin accepts, then 'busy' while she builds; upgrade_house guards."""
+    reset("Farm")
+    good, text = call("upgrade_house", reason="smoke test")
+    if good:
+        raise Smoke("upgrade_house worked away from Robin's shop")
+    if not any(w in text for w in ("ScienceHouse", "fully upgraded", "underway")):
+        raise Smoke(f"upgrade_house refusal does not say why: {text.splitlines()[0]}")
+
+    listing = ok("build", building="list")
+    for name in ("Coop", "Barn", "Silo"):
+        if name not in listing:
+            raise Smoke(f"build list has no {name}: {listing[:300]}")
+    price = re.search(r"Coop[^\n:]*: ([\d,]+)g", listing)
+    if not price:
+        raise Smoke(f"build list shows no Coop price: {listing[:300]}")
+    cost = int(price.group(1).replace(",", ""))
+
+    spots = ok("build", building="Coop")
+    if "No free" in spots:
+        raise SkipCase("no free area for a Coop on this farm; clear some ground")
+    m = re.search(r"top-left tile\): \((\d+),(\d+)\)", spots)
+    if not m:
+        raise Smoke(f"build(Coop) suggested no spot: {spots[:300]}")
+    x, y = int(m.group(1)), int(m.group(2))
+
+    enter_shop("ScienceHouse", "Robin")
+    if "busy" in ok("build", building="list"):
+        raise SkipCase("Robin is already building something in this save")
+    debug("set_money", n=cost + 500)
+    debug("add_item", id="388", qty=400)  # Wood
+    debug("add_item", id="390", qty=200)  # Stone
+    money = fresh_state().get("money")
+    text = ok("build", building="Coop", x=x, y=y, reason="smoke test")
+    if "Robin is building" not in text:
+        raise Smoke(f"build did not start: {text.splitlines()[0]}")
+    if fresh_state().get("money") != money - cost:
+        raise Smoke(f"expected money {money - cost}g after the Coop, got {fresh_state().get('money')}g")
+    if "Under construction" not in ok("status"):
+        raise Smoke("status does not show the Coop under construction")
+    good, text = call("build", building="Barn", x=x, y=y, reason="smoke test")
+    if good or "busy" not in text:
+        raise Smoke(f"Robin should be busy with the Coop, got: {text.splitlines()[0]}")
+
+
+@case("ranch_animals")
+def ranch_animals():
+    """#10: Marnie's list, the shop gate, and (when a finished coop has room) buy, pet, collect and feed."""
+    reset("Farm")
+    listing = ok("buy_animal", type="list")
+    if "Chicken" not in listing:
+        raise Smoke(f"buy_animal list has no Chicken: {listing[:300]}")
+    price = int(re.search(r"Chicken: ([\d,]+)g", listing).group(1).replace(",", ""))
+    ok("animals")
+    good, _ = call("buy_animal", type="Chicken", reason="smoke test")
+    if good:
+        raise Smoke("buy_animal worked away from Marnie's shop")
+    if "room in Coop" not in listing and "room in Big Coop" not in listing and "room in Deluxe Coop" not in listing:
+        raise SkipCase("no finished coop with room on this farm (Robin builds one over a night); gate and list were checked")
+
+    enter_shop("AnimalShop", "Marnie")
+    debug("set_money", n=price + 500)
+    money = fresh_state().get("money")
+    text = ok("buy_animal", type="Chicken", name="Smokey", reason="smoke test")
+    if "Smokey" not in text:
+        raise Smoke(f"buy_animal result does not name the animal: {text.splitlines()[0]}")
+    if fresh_state().get("money") != money - price:
+        raise Smoke(f"expected money {money - price}g after the chicken, got {fresh_state().get('money')}g")
+    overview = ok("animals")
+    if "Smokey" not in overview:
+        raise Smoke(f"animals does not list the new chicken:\n{overview}")
+    house = re.search(r'enter with travel_to "([^"]+)"', overview)
+    if not house:
+        raise Smoke("animals does not say how to enter the coop")
+    ok("travel_to", location=house.group(1), reason="smoke test")
+    text = ok("animals", action="pet", reason="smoke test")
+    if not re.search(r"Pet [1-9]\d* of", text):
+        raise Smoke(f"no animal was pet: {text.splitlines()[0]}")
+    ok("animals", action="collect", reason="smoke test")  # nothing to collect from a baby: only the result shape is checked
+    call("animals", action="feed", reason="smoke test")  # needs a silo with hay: result shape only
+
+
+@case("tool_reasons")
+def tool_reasons():
+    """Reason codes (#18): a tool that fails says why in a [tag] and in structuredContent, a batch that stops early says partial."""
+    reset("Farm")
+    plain = call_raw("p1", "status", {})
+    if "structuredContent" not in plain:
+        raise SkipCase("this mod build returns no structuredContent (older than #18)")
+    sc = plain["structuredContent"]
+    if sc.get("ok") is not True or sc.get("reason") != "ok" or plain["content"][0]["text"].startswith("["):
+        raise Smoke(f"a plain ok result should be untagged with reason ok: {str(plain)[:200]}")
+
+    # A known failure: a tool the player does not have -> no_item, tagged, isError.
+    bad = call_raw("p1", "use_tool", {"tool": "Smoke Test Tool", "tiles": [[1, 1]], "reason": "smoke test"})
+    text = bad["content"][0]["text"]
+    if bad["isError"] is not True or bad["structuredContent"] != {"ok": False, "reason": "no_item"} or not text.startswith("[no_item] "):
+        raise Smoke(f"use_tool with a missing tool should fail as [no_item]: {str(bad)[:300]}")
+
+    # A batch that stops early: with 2 energy use_tool stops before the first tile (the tiles are never visited).
+    debug("set_stamina", n=2)
+    try:
+        part = call_raw("p1", "use_tool", {"tool": "Hoe", "tiles": [[1, 1], [2, 1], [3, 1]], "reason": "smoke test"})
+    finally:
+        debug("set_stamina", n=270)
+    sc = part["structuredContent"]
+    text = part["content"][0]["text"]
+    if not text.startswith("[partial \u00b7 low_energy] "):
+        raise Smoke(f"expected the tag [partial \u00b7 low_energy], got: {text.splitlines()[0]}")
+    data = sc.get("data") or {}
+    if sc.get("partial") is not True or sc.get("reason") != "low_energy" or data.get("remaining") != 3 or data.get("done") != 0:
+        raise Smoke(f"expected partial/low_energy with remaining 3, got: {sc}")
+
+
+CASES.append(Case("clint_pickup", lambda: None, skip="the two-day wait and Clint's counter pickup are not automated yet (#2)"))
 
 
 # ---------------------------------------------------------------------- runner
@@ -1237,6 +2737,7 @@ def main() -> int:
     failures = 0
     try:
         load_and_wait(smoke_name)
+        debug("perception", interrupts=0)  # a loaded save switches interrupts on; the cases walk past other seats
         log.new_errors()  # ignore load-time noise from before the first case
         for c in chosen:
             if c.skip:

@@ -28,8 +28,10 @@ public class ModEntry : Mod
         _log = new AgentLog(logDir, Monitor);
         AgentTools.Config = _config;
         Players.Init(helper, Monitor, _config, _log);
+        DayStats.Init(_log);
         WorldClock.Init(_config);
         PassOut.Init(_log);
+        Perception.Init();
         SplitScreen.Init(helper, Monitor, _config);
         SplitScreenPatches.Apply(ModManifest, _config);
         SocialTools.Apply(ModManifest);
@@ -45,7 +47,13 @@ public class ModEntry : Mod
             PassOut.OnReturnedToTitle();
         };
         helper.Events.GameLoop.UpdateTicked += OnUpdateTicked;
-        helper.Events.GameLoop.DayStarted += (_, _) => Briefing.OnDayStarted();
+        helper.Events.GameLoop.DayStarted += (_, _) =>
+        {
+            Briefing.OnDayStarted();
+            JojaRoute.OnDayStarted();
+        };
+        // The day's log is complete here: write day_XXX_summary.json (failure reasons per tool).
+        helper.Events.GameLoop.DayEnding += (_, _) => { if (Context.ScreenId == 0) DaySummary.Write(_log, AgentLog.FarmDay, Monitor); };
 
         helper.ConsoleCommands.Add(
             "mcp_freeze",
@@ -108,6 +116,12 @@ public class ModEntry : Mod
             return;
 
         _autoLoadDone = true;
+        // A wrong name would otherwise end in a failed load and a stuck title screen (runner/game_watchdog.py then waits in vain).
+        if (!Directory.Exists(Path.Combine(Constants.SavesPath, _config.AutoLoadSave)))
+        {
+            Monitor.Log($"AutoLoadSave \"{_config.AutoLoadSave}\" is not a folder in {Constants.SavesPath}; staying on the title screen.", LogLevel.Error);
+            return;
+        }
         SaveFolder.Pending = _config.AutoLoadSave;
         Monitor.Log($"Auto-loading save {_config.AutoLoadSave}", LogLevel.Info);
         SaveGame.Load(_config.AutoLoadSave);

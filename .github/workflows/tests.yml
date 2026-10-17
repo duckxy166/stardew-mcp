@@ -1,0 +1,39 @@
+name: tests
+
+# Runs the tests that don't need Stardew Valley. The mod itself (mod/StardewMCP) is NOT built here: it
+# references the game and SMAPI assemblies through Pathoschild.Stardew.ModBuildConfig, which only
+# works on a machine with the game installed. See CONTRIBUTING.md#tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Runner and studio (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install pytest
+      - run: python -m pytest -q runner/tests studio
+
+  dotnet:
+    name: Game-free C# tests (dotnet test)
+    runs-on: ubuntu-latest
+    # Best effort for now: mod/StardewMCP.Tests compiles only the mod's game-free source files (it does
+    # not reference the mod project), but it was written without a .NET SDK at hand and has not had a
+    # green CI run yet. Remove continue-on-error once it has.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+      - run: dotnet test mod/StardewMCP.Tests

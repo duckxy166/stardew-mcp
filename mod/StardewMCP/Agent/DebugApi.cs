@@ -20,6 +20,7 @@ public static class DebugApi
     private static string? _pendingLoad;
     private static bool _exiting;
     private static int _titleTicks;
+    private static int _hangSeconds;
 
     private static string S(JsonElement a, string name, string def = "") =>
         a.ValueKind == JsonValueKind.Object && a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? def : def;
@@ -50,6 +51,10 @@ public static class DebugApi
             Op("place_object", PlaceObject),
             Op("set_mine_level", SetMineLevel),
             Op("separate_wallets", SeparateWallets),
+            Op("set_friendship", RomanceDebug.SetFriendship),
+            Op("open_naming", RomanceDebug.OpenNaming),
+            Op("last_named", RomanceDebug.LastNamed),
+            Op("resolve_naming", RomanceDebug.ResolveNaming),
             Op("load_save", LoadSave, needsWorld: false),
             Op("build_cabins", BuildCabins),
             Op("place_chest", PlaceChest),
@@ -57,6 +62,8 @@ public static class DebugApi
             Op("capture", Capture, needsWorld: false),
             Op("chat_log", ChatLog),
             Op("disconnect", Disconnect),
+            Op("hang", Hang, needsWorld: false),
+            Op("perception", PerceptionOp),
         }.ToDictionary(t => t.Name);
     }
 
@@ -107,6 +114,7 @@ public static class DebugApi
         catch (Exception ex) { c.Fail($"Cannot create {id}: {ex.Message}"); yield break; }
         if (item == null) { c.Fail($"Cannot create {id}"); yield break; }
 
+        if (Has(a, "quality")) item.Quality = Math.Clamp(I(a, "quality", 0), 0, 4);
         if (!Game1.player.addItemToInventoryBool(item)) { c.Fail("Inventory is full"); yield break; }
         c.Result = $"Added {qty} x {item.DisplayName}";
         yield break;
@@ -307,6 +315,31 @@ public static class DebugApi
         yield break;
     }
 
+    /// <summary>
+    /// Test hook for runner/game_watchdog.py: block the whole game loop (every screen) for N seconds, starting on the
+    /// next host tick so this call still answers. The HTTP server keeps running, like in a real hang, so /api/state
+    /// answers with a stale snapshot whose "heartbeat" stops counting.
+    /// </summary>
+    private static IEnumerator Hang(JsonElement a, CallContext c)
+    {
+        _hangSeconds = Math.Clamp(I(a, "seconds", 300), 1, 1800);
+        c.Result = $"Blocking the game loop for {_hangSeconds}s from the next tick";
+        yield break;
+    }
+
+    /// <summary>
+    /// Perception switches for the smoke runner: <c>interrupts</c> 0/1 stops/allows events from interrupting running actions
+    /// (the runner turns them off so cases that walk past other seats are not cut short), <c>clear</c> 1 drops every seat's pending events.
+    /// </summary>
+    private static IEnumerator PerceptionOp(JsonElement a, CallContext c)
+    {
+        Perception.SyncSave(); // so a save change that has not been noticed yet cannot undo this call
+        if (Has(a, "interrupts")) Perception.Interrupts = I(a, "interrupts", 1) != 0;
+        if (Has(a, "clear") && I(a, "clear", 0) != 0) Perception.Clear();
+        c.Result = $"Perception interrupts are {(Perception.Interrupts ? "on" : "off")}";
+        yield break;
+    }
+
     /// <summary>What this screen's chat box shows, one line per message (to prove a line reached this player's screen).</summary>
     private static IEnumerator ChatLog(JsonElement a, CallContext c)
     {
@@ -334,6 +367,13 @@ public static class DebugApi
     /// <summary>Called every tick from ModEntry: leave the current save, then load the requested one from the title screen.</summary>
     public static void Tick()
     {
+        if (_hangSeconds > 0)
+        {
+            int seconds = _hangSeconds;
+            _hangSeconds = 0;
+            System.Threading.Thread.Sleep(TimeSpan.FromSeconds(seconds));
+        }
+
         if (_pendingLoad == null) return;
 
         if (Context.IsWorldReady)

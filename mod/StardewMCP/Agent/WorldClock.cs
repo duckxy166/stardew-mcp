@@ -32,7 +32,11 @@ public static class WorldClock
     /// <summary>Seats currently holding the world frozen.</summary>
     public static string[] ThinkingSeats { get; private set; } = Array.Empty<string>();
 
-    public static void Init(ModConfig config) => _config = config;
+    public static void Init(ModConfig config)
+    {
+        _config = config;
+        RunControl.Init(config);
+    }
 
     /// <summary>Seconds this seat has been thinking, or null when it isn't.</summary>
     public static double? ThinkingSeconds(PlayerSlot slot) =>
@@ -41,12 +45,16 @@ public static class WorldClock
     /// <summary>Called on the host screen's tick, after the host runtime ticked.</summary>
     public static void Tick()
     {
+        RunControl.Tick();
         bool split = Players.SplitScreen;
         var thinking = Players.Slots.Where(s => IsThinking(s, split)).ToArray();
         ThinkingSeats = thinking.Select(s => s.Id).ToArray();
 
         bool freeze = _config.FreezeTimeWhileThinking && Context.IsWorldReady && thinking.Length > 0 &&
                       !Game1.newDay && !NightMenuOpen() && !Players.Slots.Any(s => s.Runtime.WakingUp);
+        // Paused / stopped by the operator: let the running actions finish, then stand still whoever is thinking.
+        if (RunControl.Holding)
+            freeze = Context.IsWorldReady && !Game1.newDay && !NightMenuOpen() && !RunControl.AnyActionRunning;
 
         if (split)
         {
@@ -70,6 +78,13 @@ public static class WorldClock
         {
             watch.Reset();
             return false;
+        }
+
+        if (RunControl.Holding)
+        {
+            // Held by the operator: that time is not the AI's thinking time, so it can't run into the timeout.
+            watch.Stop();
+            return true;
         }
 
         watch.Start();

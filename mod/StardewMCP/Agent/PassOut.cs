@@ -130,6 +130,7 @@ public static class PassOut
             if (nextDay && !SleptInBed(t))
             {
                 t.Pending = Describe(t, seat.Id, day);
+                rt.Stats.NotePassOut(t.Pending.Cause);
                 t.Waited = 0;
                 return;
             }

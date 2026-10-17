@@ -73,13 +73,16 @@ def test_tail_lines_keeps_the_newest(tmp_path):
 
 
 def test_inject_fills_every_placeholder_in_the_real_system_prompt(tmp_path):
+    import language
     template = (RUNNER / "system_prompt.md").read_text(encoding="utf-8")
+    template = language.fill_prompt(template, "Thai").replace("{RELATIONSHIPS}", "")
     found = set(re.findall(r"\{([A-Z]+)\}", template))
     assert found == set(memory.PLACEHOLDERS), "system_prompt.md and memory.PLACEHOLDERS must list the same placeholders"
     out = memory.inject(template, tmp_path, "Win.", "(This is your first day. No diaries yet.)")
     assert not re.search(r"\{[A-Z]+\}", out)
     assert memory.NO_LESSONS in out and memory.NO_PLAN in out and memory.NO_NOTES in out
     assert "Win." in out and "No diaries yet" in out
+
 
 
 def test_day_two_prompt_carries_day_ones_lessons_plan_and_notes(tmp_path):

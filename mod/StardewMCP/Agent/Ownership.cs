@@ -66,24 +66,31 @@ public static class Ownership
 
     // ------------------------------------------------------------------ theft
 
-    private static void Theft(string what, string victim, string item, string location, int x, int y)
+    public sealed record TheftEvent(string Taker, string Owner, string What, string Thing, string Location, int X, int Y, int Day, string Time);
+
+    public static event Action<TheftEvent>? Theft;
+
+    private static void LogTheft(string what, string victim, string item, string location, int x, int y)
     {
         var thief = Players.Current;
         if (thief.Role != SeatRole.Ai || thief.Id == victim) return;
         thief.Runtime.Log.Add("theft",
             text: $"{thief.Id} took {item} from {victim}'s {what} at {location} ({x},{y})",
             args: new { victim, what, item, location, tile = new[] { x, y } });
+        var ev = new TheftEvent(thief.Id, victim, item, what, location, x, y, AgentLog.FarmDay, WorldText.FormatTime(Game1.timeOfDay));
+        try { Theft?.Invoke(ev); }
+        catch { }
     }
 
     private static void Harvest_Postfix(Crop __instance, int xTile, int yTile, HoeDirt soil, StardewValley.Characters.JunimoHarvester junimoHarvester, bool __result)
     {
         if (!__result || junimoHarvester != null || soil == null || OwnerOf(soil) is not { } owner) return;
-        Theft("crop", owner, WorldText.CropName(__instance), Game1.currentLocation?.NameOrUniqueName ?? "", xTile, yTile);
+        LogTheft("crop", owner, WorldText.CropName(__instance), Game1.currentLocation?.NameOrUniqueName ?? "", xTile, yTile);
     }
 
     private static void GrabFromChest_Prefix(Chest __instance, Item item, Farmer who)
     {
         if (!who.IsLocalPlayer || OwnerOf(__instance) is not { } owner || !who.couldInventoryAcceptThisItem(item)) return;
-        Theft("chest", owner, $"{item.Stack} x {item.DisplayName}", __instance.Location?.NameOrUniqueName ?? "", (int)__instance.TileLocation.X, (int)__instance.TileLocation.Y);
+        LogTheft("chest", owner, $"{item.Stack} x {item.DisplayName}", __instance.Location?.NameOrUniqueName ?? "", (int)__instance.TileLocation.X, (int)__instance.TileLocation.Y);
     }
 }

@@ -14,15 +14,18 @@ namespace StardewMCP.Agent;
 /// <summary>
 /// One HTTP listener for everything:
 ///   POST /mcp/p1..p3 MCP (JSON-RPC over streamable HTTP, JSON responses only), one per AI seat;
-///                    POST /mcp is p1 (single-player runs)
+///                    POST /mcp is p1 (single-player runs); add ?breaks=1 to get planned session breaks (SessionBreaks.cs)
 ///   GET  /overlay    OBS browser-source overlay (Thai thoughts + actions)
 ///   GET  /replay     day-by-day replay of the logs
 ///   GET  /api/feed   overlay feed, /api/days, /api/day?n=, /api/state
 ///   GET  /api/memory each AI seat's lessons, plan and notes (what the journal tool wrote)
 ///   GET  /api/briefing?seat=p1  morning briefing of one AI seat (JSON; see Briefing.cs)
+///   GET  /api/relationships  every AI farmer's friendships (the runner writes relationships.md from it)
+///   GET  /api/stats  days with stats files; /api/stats?n=3 is day 3 of every AI seat (stats_NNN.json)
 ///   POST /api/meta   runner metadata (model, session) shown on the overlay
 ///   POST /api/release_freeze  runner: stop freezing the world for a seat (body {"seat":"p1"|"all","on":true}) until its farmer
 ///                    passes out; ends by itself on the next farm day (#22)
+///   GET/POST /api/control   run control: pause, resume, stop_after_day, stop_now, clear_stop
 ///   POST /api/debug/{op}, /api/debug/p{N}/{op}   smoke-test hooks (EnableDebugApi only)
 /// </summary>
 public class AgentHttp
@@ -34,10 +37,14 @@ public class AgentHttp
     private readonly Dictionary<string, ToolDef> _tools;
     private readonly Dictionary<string, ToolDef> _debug = DebugApi.All();
     private HttpListener? _listener;
-    private const string ProtocolFallback = "2025-06-18";
+    private readonly McpDispatcher _mcp; // JSON-RPC handling, see McpDispatcher.cs
 
     // Snapshot of game state for the overlay, refreshed on the game thread.
     public volatile string StateJson = "{}";
+
+    // Counts snapshots. The HTTP thread keeps answering with the last snapshot even when the game loop is
+    // blocked, so runner/game_watchdog.py reads this "heartbeat" to tell a live game from a hung one.
+    private long _beat;
 
     public AgentHttp(AgentLog log, ModConfig config, IMonitor monitor, string assetDir)
     {
@@ -46,6 +53,9 @@ public class AgentHttp
         _monitor = monitor;
         _assetDir = assetDir;
         _tools = AgentTools.All().ToDictionary(t => t.Name);
+        _mcp = new McpDispatcher(_tools, _config.SplitScreen);
+        foreach (var problem in ToolContract.Check(_tools.Values))
+            _monitor.Log("Tool contract: " + problem, LogLevel.Warn);
     }
 
     public void Start(int port)
@@ -133,6 +143,7 @@ public class AgentHttp
                     await Json(res, new
                     {
                         state = JsonDocument.Parse(StateJson).RootElement,
+                        thoughtLanguage = ThoughtLanguageName,
                         meta = _log.Meta,
                         entries = _log.FeedAfter(after)
                     });
@@ -144,6 +155,22 @@ public class AgentHttp
                     var (briefStatus, briefBody) = await Briefing.Serve(req.QueryString["seat"], _config.SplitScreen);
                     if (briefStatus != 200) { res.StatusCode = briefStatus; res.Close(); return; }
                     await Text(res, briefBody, "application/json");
+                    return;
+                case "/api/relationships":
+                    await Json(res, await NpcStory.ReportAsync());
+                    return;
+                case "/api/stats":
+                    await Json(res, DayStats.Api(_log, req.QueryString["n"]));
+                    return;
+                case "/api/control":
+                    // pause | resume | stop_after_day | stop_now | clear_stop (GET reads the flags)
+                    var controlBody = "";
+                    if (req.HttpMethod == "POST")
+                        using (var cr = new StreamReader(req.InputStream, Encoding.UTF8))
+                            controlBody = await cr.ReadToEndAsync();
+                    var control = RunControl.Handle(req.HttpMethod, controlBody);
+                    res.StatusCode = control.Ok ? 200 : 400;
+                    await Json(res, control.Body);
                     return;
                 case "/api/days":
                     await Json(res, _log.Days());
@@ -282,70 +309,13 @@ public class AgentHttp
         using (var r = new StreamReader(req.InputStream, Encoding.UTF8)) body = await r.ReadToEndAsync();
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
+        SessionBreaks.Observe(seat.Id, root, req.QueryString["breaks"]); // "initialize" starts a session; /mcp?breaks=1 opts in (#30)
 
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            var outs = new List<object>();
-            foreach (var m in root.EnumerateArray())
-            {
-                var o = await Dispatch(m, seat);
-                if (o != null) outs.Add(o);
-            }
-            if (outs.Count == 0) { res.StatusCode = 202; res.Close(); return; }
-            await Json(res, outs);
-            return;
-        }
-
-        var reply = await Dispatch(root, seat);
-        if (reply == null) { res.StatusCode = 202; res.Close(); return; }
-        res.Headers["Mcp-Session-Id"] = "stardew-" + seat.Id;
-        await Json(res, reply);
+        var reply = await _mcp.Handle(root, new McpSeat(seat));
+        if (reply.Body == null) { res.StatusCode = reply.Status; res.Close(); return; }
+        if (reply.SessionId != null) res.Headers["Mcp-Session-Id"] = reply.SessionId;
+        await Json(res, reply.Body);
     }
-
-    private async Task<object?> Dispatch(JsonElement msg, PlayerSlot seat)
-    {
-        // Any MCP traffic means an AI is attached to this seat: from now on its thinking freezes the world.
-        seat.MarkContact();
-        var method = msg.TryGetProperty("method", out var m) ? m.GetString() ?? "" : "";
-        if (!msg.TryGetProperty("id", out var idEl)) return null; // notification
-        object id = idEl.ValueKind == JsonValueKind.Number ? idEl.GetInt64() : (object)(idEl.GetString() ?? "");
-        var p = msg.TryGetProperty("params", out var pe) ? pe : default;
-
-        switch (method)
-        {
-            case "initialize":
-                var ver = p.ValueKind == JsonValueKind.Object && p.TryGetProperty("protocolVersion", out var pv) ? pv.GetString() : ProtocolFallback;
-                return Ok(id, new
-                {
-                    protocolVersion = ver ?? ProtocolFallback,
-                    capabilities = new { tools = new { listChanged = false } },
-                    serverInfo = new { name = "stardew", version = "2.0.0" },
-                    instructions = _config.SplitScreen
-                        ? $"You are player {seat.Id} on a three-player Stardew Valley farm. The whole world is frozen while you or another player is thinking, and only moves while actions run."
-                        : "You are playing Stardew Valley. Game time is frozen while you think and only moves while an action runs."
-                });
-            case "ping":
-                return Ok(id, new { });
-            case "tools/list":
-                return Ok(id, new
-                {
-                    tools = _tools.Values.Select(t => new { name = t.Name, description = t.Description, inputSchema = t.Schema })
-                });
-            case "tools/call":
-                var name = p.GetProperty("name").GetString() ?? "";
-                var args = p.TryGetProperty("arguments", out var a) ? a.Clone() : JsonDocument.Parse("{}").RootElement;
-                if (!_tools.TryGetValue(name, out var tool))
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Unknown tool {name}" } }, isError = true });
-                if (!seat.Active)
-                    return Ok(id, new { content = new[] { new { type = "text", text = $"Player {seat.Id} is not in the game yet (title screen, loading or still joining). Wait and try again." } }, isError = true });
-                var (ok, text) = await seat.Runtime.Enqueue(tool, args, observation: true);
-                return Ok(id, new { content = new[] { new { type = "text", text } }, isError = !ok });
-            default:
-                return new { jsonrpc = "2.0", id, error = new { code = -32601, message = $"Method not found: {method}" } };
-        }
-    }
-
-    private static object Ok(object id, object result) => new { jsonrpc = "2.0", id, result };
 
     // ------------------------------------------------------------------ helpers
 
@@ -367,6 +337,10 @@ public class AgentHttp
         if (!System.IO.File.Exists(path)) { res.StatusCode = 404; res.Close(); return; }
         await Text(res, await System.IO.File.ReadAllTextAsync(path, Encoding.UTF8), "text/html");
     }
+
+    /// <summary>ThoughtLanguage from config.json (blank = "Thai"); the overlay, replay and runner follow it.</summary>
+    private string ThoughtLanguageName =>
+        string.IsNullOrWhiteSpace(_config.ThoughtLanguage) ? "Thai" : _config.ThoughtLanguage.Trim();
 
     /// <summary>Refresh the overlay state snapshot (call on the host screen's tick, ~4x/sec).</summary>
     public void RefreshState()
@@ -396,7 +370,7 @@ public class AgentHttp
 
         if (!Context.IsWorldReady)
         {
-            StateJson = JsonSerializer.Serialize(new { ready = false, frozen = WorldClock.Frozen, players }, AgentLog.Json);
+            StateJson = JsonSerializer.Serialize(new { ready = false, heartbeat = ++_beat, frozen = WorldClock.Frozen, players }, AgentLog.Json);
             return;
         }
         var p = Game1.player;
@@ -404,7 +378,9 @@ public class AgentHttp
         StateJson = JsonSerializer.Serialize(new
         {
             ready = true,
+            heartbeat = ++_beat,
             saveFolder = SaveFolder.Name,
+            thoughtLanguage = ThoughtLanguageName,
             day = AgentLog.FarmDay,
             season = Game1.currentSeason,
             dayOfMonth = Game1.dayOfMonth,
@@ -417,11 +393,18 @@ public class AgentHttp
             maxEnergy = p.MaxStamina,
             frozen = WorldClock.Frozen,
             thinking = WorldClock.ThinkingSeats,
+            // The clock does not run in cutscenes and festivals; the watchdog must not read that as a hang.
+            eventUp = Game1.eventUp,
+            festival = Game1.CurrentEvent != null && Game1.CurrentEvent.isFestival,
             action = Players.Host.Runtime.CurrentTool,
             dialogue = Game1.activeClickableMenu is StardewValley.Menus.DialogueBox box
                 ? new { speaker = box.characterDialogue?.speaker?.displayName, question = box.isQuestion }
                 : null,
             screens = GameRunner.instance.gameInstances.Count,
+            // Run control (RunControl.cs). A watchdog must not read a paused game as hung.
+            paused = RunControl.Paused,
+            stopAfterDay = RunControl.StopAfterDay,
+            stopNow = RunControl.StopNow,
             plan = PlanBoard.Snapshot(),
             owned = Ownership.OwnedObjects(),
             pendingJournalDay = hostPass.PendingDay,

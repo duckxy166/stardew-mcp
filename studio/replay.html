@@ -24,22 +24,24 @@
   .row .k { font-size: 13px; color: var(--muted); }
   .row.think .txt { color: var(--think); font-size: 17px; }
   .row .res { color: var(--muted); font-size: 13px; white-space: pre-wrap; }
-  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  body:not(.i18n) { visibility: hidden; } /* nothing shows until the language is known */
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .part { color: var(--accent); }
+  .why { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid currentColor; border-radius: 6px; font-size: 12px; }
   @media (max-width: 700px) { main { grid-template-columns: 1fr; } nav { display: flex; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--edge); } nav button { width: auto; white-space: nowrap; } .row { grid-template-columns: 56px 1fr; } .row .k { display: none; } }
 </style>
 </head>
 <body>
-<header><h1>Claude Haiku เล่น Stardew — Replay</h1><span id="sum"></span></header>
+<header><h1 data-i18n="title"></h1><span id="sum"></span></header>
 <main>
   <nav id="days"></nav>
   <section>
     <div class="filters">
-      <label><input type="checkbox" id="fThink" checked> ความคิด</label>
-      <label><input type="checkbox" id="fAct" checked> การกระทำ</label>
-      <label><input type="checkbox" id="fRes" checked> ผลลัพธ์</label>
-      <label><input type="checkbox" id="fSys" checked> ระบบ</label>
+      <label><input type="checkbox" id="fThink" checked> <span data-i18n="fThink"></span></label>
+      <label><input type="checkbox" id="fAct" checked> <span data-i18n="fAct"></span></label>
+      <label><input type="checkbox" id="fRes" checked> <span data-i18n="fRes"></span></label>
+      <label><input type="checkbox" id="fSys" checked> <span data-i18n="fSys"></span></label>
     </div>
-    <div id="diary" class="diary">เลือกวันทางซ้าย</div>
+    <div id="diary" class="diary" data-i18n="pickDay"></div>
     <div id="rows"></div>
   </section>
 </main>
@@ -50,9 +52,60 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "
 
 const API = (new URLSearchParams(location.search).get("api") || (location.port === "8770" ? "" : "http://localhost:8770")).replace(/\/$/, "");
 
+// ====== i18n:begin ======================================================================================
+// Every viewer-facing string of this page. The mod reports ThoughtLanguage in /api/feed (`thoughtLanguage`);
+// ?lang=Thai|English overrides it. `en` is the complete base table; the other tables only list what differs,
+// and a missing key falls back to `en`. To add a language: add a table under its code (ja, ...) and, when its
+// ThoughtLanguage name differs from the code, a LANG_NAMES entry. A language without a table shows `en`.
+const LANG_NAMES = { thai: "th", english: "en" };
+const I18N = {
+  en: {
+    title: "Claude Haiku plays Stardew — Replay",
+    fThink: "Thoughts", fAct: "Actions", fRes: "Results", fSys: "System",
+    pickDay: "Pick a day on the left",
+    noDiary: "(no diary for this day yet)",
+    dayButton: d => `Day ${d}`,
+    summary: (day, acts, fails, mins, parts = 0, top = "") => `Day ${day} · ${acts} actions · ${fails} failed${parts ? ` · ${parts} partial` : ""}${top ? ` (${top})` : ""} · ~${mins} min real time`,
+    rowThink: "💭 think",
+  },
+  th: {
+    title: "Claude Haiku เล่น Stardew — Replay",
+    fThink: "ความคิด", fAct: "การกระทำ", fRes: "ผลลัพธ์", fSys: "ระบบ",
+    pickDay: "เลือกวันทางซ้าย",
+    noDiary: "(ยังไม่มีไดอารี่วันนี้)",
+    dayButton: d => `วันที่ ${d}`,
+    summary: (day, acts, fails, mins, parts = 0, top = "") => `วันที่ ${day} · ${acts} actions · ล้มเหลว ${fails}${parts ? ` · ทำได้บางส่วน ${parts}` : ""}${top ? ` (${top})` : ""} · ใช้เวลาจริง ~${mins} นาที`,
+    rowThink: "💭 คิด",
+  },
+};
+// "Thai" / "English" / "th" / "en-US" -> a table code; blank = the mod's default (Thai); anything else -> en
+function pickLang(name) {
+  const k = String(name == null ? "" : name).trim().toLowerCase() || "thai";
+  const code = LANG_NAMES[k] || k.split(/[-_]/)[0];
+  return I18N[code] ? code : "en";
+}
+// ====== i18n:end ========================================================================================
+const LANG_PARAM = new URLSearchParams(location.search).get("lang");
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+let L = I18N.en;
+function t(key, ...a) { const v = hasOwn(L, key) ? L[key] : I18N.en[key]; return typeof v === "function" ? v(...a) : v; }
+function setLang(name) {
+  const key = pickLang(LANG_PARAM || name);
+  L = I18N[key];
+  document.documentElement.lang = key;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.body.classList.add("i18n");
+}
+// /api/feed always carries thoughtLanguage (even before a save is loaded); an `after` past the end keeps the reply tiny
+async function initLang() {
+  let name = null;
+  if (!LANG_PARAM) try { name = (await (await fetch(`${API}/api/feed?after=9007199254740991`)).json()).thoughtLanguage; } catch (e) { /* default */ }
+  setLang(name);
+}
+
 async function loadDays() {
   const days = await (await fetch(`${API}/api/days`)).json();
-  $("days").innerHTML = days.map(d => `<button data-d="${d}">วันที่ ${d}</button>`).join("");
+  $("days").innerHTML = days.map(d => `<button data-d="${d}">${t("dayButton", d)}</button>`).join("");
   $("days").querySelectorAll("button").forEach(b => b.onclick = () => show(+b.dataset.d));
   if (days.length) show(days[days.length - 1]);
 }
@@ -66,23 +119,32 @@ async function show(d) {
 
 function render() {
   if (!data) return;
-  $("diary").textContent = data.diary || "(ยังไม่มีไดอารี่วันนี้)";
+  $("diary").textContent = data.diary || t("noDiary");
   const show = { think: $("fThink").checked, action: $("fAct").checked, result: $("fRes").checked, system: $("fSys").checked, diary: true };
   const es = data.entries;
   const acts = es.filter(e => e.kind === "action").length;
   const fails = es.filter(e => e.kind === "result" && e.ok === false).length;
+  const parts = es.filter(e => e.kind === "result" && e.ok !== false && e.partial === true).length;
+  // most common reason codes of the day's failed / partial results (the mod writes `reason` on result lines)
+  const why = {};
+  es.forEach(e => { if (e.kind === "result" && e.reason && (e.ok === false || e.partial)) why[e.reason] = (why[e.reason] || 0) + 1; });
+  const top = Object.entries(why).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).slice(0, 3).map(([r, n]) => `${r} ×${n}`).join(", ");
   const t0 = es[0]?.ts, t1 = es[es.length - 1]?.ts;
   const mins = t0 && t1 ? Math.round((new Date(t1) - new Date(t0)) / 60000) : 0;
-  $("sum").textContent = `วันที่ ${data.day} · ${acts} actions · ล้มเหลว ${fails} · ใช้เวลาจริง ~${mins} นาที`;
+  $("sum").textContent = t("summary", data.day, acts, fails, mins, parts, top);
   $("rows").innerHTML = es.filter(e => show[e.kind]).map(e => {
-    if (e.kind === "think") return `<div class="row think"><span class="t">${e.gameTime}</span><span class="k">💭 คิด</span><span class="txt">${esc(e.text)}</span></div>`;
+    if (e.kind === "think") return `<div class="row think"><span class="t">${e.gameTime}</span><span class="k">${t("rowThink")}</span><span class="txt">${esc(e.text)}</span></div>`;
     if (e.kind === "action") return `<div class="row"><span class="t">${e.gameTime}</span><span class="k">▶ ${esc(e.tool)}</span><span>${esc(e.text)} <span class="res">${esc(e.args ? JSON.stringify(e.args) : "")}</span></span></div>`;
-    if (e.kind === "result") return `<div class="row"><span class="t">${e.gameTime}</span><span class="k ${e.ok ? "ok" : "bad"}">${e.ok ? "✓" : "✗"} ${esc(e.tool)}</span><span class="res">${esc(e.text)} (${e.ms} ms)</span></div>`;
+    if (e.kind === "result") {
+      const part = e.ok !== false && e.partial === true, cls = e.ok === false ? "bad" : part ? "part" : "ok";
+      const badge = e.reason && cls !== "ok" ? `<span class="why ${cls}">${esc(e.reason)}</span>` : "";
+      return `<div class="row"><span class="t">${e.gameTime}</span><span class="k ${cls}">${cls === "bad" ? "✗" : part ? "◐" : "✓"} ${esc(e.tool)}</span><span class="res">${badge}${esc(e.text)} (${e.ms} ms)</span></div>`;
+    }
     return `<div class="row"><span class="t">${e.gameTime}</span><span class="k">${e.kind}</span><span>${esc(e.text)}</span></div>`;
   }).join("");
 }
 ["fThink", "fAct", "fRes", "fSys"].forEach(id => $(id).onchange = render);
-loadDays();
+initLang().then(loadDays);
 </script>
 </body>
 </html>

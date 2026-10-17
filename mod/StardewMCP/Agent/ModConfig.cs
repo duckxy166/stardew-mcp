@@ -22,6 +22,12 @@ public class ModConfig
     public string ThoughtLanguage { get; set; } = "Thai";
 
     /// <summary>
+    /// water_all, clear_area, till_area (and the Scythe pass of harvest_all) stop when energy drops below this, instead of
+    /// working until the farmer is exhausted. They never eat; the AI decides.
+    /// </summary>
+    public int FarmBatchMinEnergy { get; set; } = 10;
+
+    /// <summary>
     /// Three-AI split-screen: after the save loads, join P2–P4 as local farmhands (needs 3 free
     /// cabins). P1–P3 are AIs on /mcp/p1../mcp/p3, P4 is the video's camera screen.
     /// </summary>
@@ -32,6 +38,15 @@ public class ModConfig
 
     /// <summary>Split-screen: an AI that thinks longer than this (seconds) stops holding the world frozen. 0 = never.</summary>
     public int ThinkTimeoutSeconds { get; set; } = 300;
+
+    /// <summary>Loop guard (#31): add a "try something different" hint once the identical call has failed this many times in a row. 0 = off.</summary>
+    public int RepeatHintAfter { get; set; } = 3;
+
+    /// <summary>Loop guard (#31): the Nth identical call in a row is refused without running when the N-1 before it all failed (the 5th by default). 0 = off.</summary>
+    public int RepeatBlockAfter { get; set; } = 5;
+
+    /// <summary>Loop guard (#31): add a "pick an action" hint after this many calls in a row with no game time, inventory or position change. 0 = off.</summary>
+    public int NoProgressAfter { get; set; } = 25;
 
     /// <summary>Split-screen: ignore the real keyboard, mouse and pad on P1 so nobody at the PC moves it or unpauses.</summary>
     public bool LockHostInput { get; set; } = true;
@@ -45,6 +60,44 @@ public class ModConfig
     /// <summary>Split-screen: from this time (HHMM, e.g. 2200) an AI that is not in bed gets one warning per day that the others wait for it. 0 = off.</summary>
     public int BedtimeWarning { get; set; } = 2200;
 
+    /// <summary>
+    /// How the fish tool plays the reel-in minigame. "perfect" writes the bar straight onto the fish (never loses one);
+    /// "natural" presses and releases the use-tool button, so the bar moves with the game's own physics and fish can
+    /// get away. "natural" patches BobberBar.update with Harmony the first time fish runs; "perfect" patches nothing.
+    /// </summary>
+    public string FishingAssist { get; set; } = "perfect";
+
     /// <summary>Profession picked when the AI hasn't used choose_profession by bedtime: 0 = left option, 1 = right.</summary>
     public int DefaultProfession { get; set; } = 0;
+
+    /// <summary>
+    /// Let villager heart events play out (their dialogue goes to the log and questions are left to the AI's respond)
+    /// instead of skipping every cutscene. Off by default until it is tested in split-screen. See NpcStory.cs.
+    /// </summary>
+    public bool PlayHeartEvents { get; set; } = false;
+
+    /// <summary>
+    /// villagers(name) shows what a villager thinks of every item you carry, straight from the game data. Off by default:
+    /// gift tastes are discovered by giving gifts (and by what other players tell you). See NpcKnowledge.cs.
+    /// </summary>
+    public bool RevealGiftTastes { get; set; } = false;
+
+    /// <summary>
+    /// Session breaks (#30): game times (HHMM) at which a seat's AI is told to continue in a new session, so old maps and
+    /// results leave its context. Only applies to MCP clients that ask for it with <c>/mcp?breaks=1</c> (runner/run_days.py does).
+    /// Empty = no time breaks.
+    /// </summary>
+    public int[] SessionBreakTimes { get; set; } = { 1200, 1800 };
+
+    /// <summary>Session breaks: also break after this many tool calls in one session. 0 = off.</summary>
+    public int SessionBreakToolCalls { get; set; } = 150;
+
+    /// <summary>Session breaks: also break once the results returned in one session add up to this many characters (about 4 per token). 0 = off.</summary>
+    public int SessionBreakResultChars { get; set; } = 120000;
+
+    /// <summary>Session breaks apply to every MCP client, not just those that connect with <c>?breaks=1</c>.</summary>
+    public bool SessionBreaksForAll { get; set; } = false;
+
+    /// <summary>Key (an XNA <c>Keys</c> name, e.g. "F8") that toggles pause / resume while the game window has focus. Empty = no hotkey.</summary>
+    public string PauseKey { get; set; } = "F8";
 }
