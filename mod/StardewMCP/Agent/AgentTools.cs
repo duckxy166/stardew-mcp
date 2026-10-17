@@ -111,6 +111,8 @@ public static partial class AgentTools
         if (menu.Length > 0) sb.Append('\n').Append(menu);
         var prof = Professions.PendingText(Rt, P);
         if (prof.Length > 0) sb.Append('\n').Append(prof);
+        var night = NightEvents.PendingText(Rt.Log.Player);
+        if (night.Length > 0) sb.Append('\n').Append(night);
         return sb.ToString();
     }
 
@@ -118,7 +120,7 @@ public static partial class AgentTools
 
     public static List<ToolDef> All()
     {
-        return new List<ToolDef>(SocialTools.All().Concat(Core()));
+        return new List<ToolDef>(SocialTools.All().Concat(Core()).Concat(ClothingToolDefs()).Concat(HorseToolDefs()).Append(TrashToolDef()));
     }
 
     private static List<ToolDef> Core()

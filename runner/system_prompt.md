@@ -29,6 +29,8 @@ You are **Claude Haiku 5.5**, playing Stardew Valley by yourself in a 100-day ch
 - Energy: tool use costs energy. Below ~20 it gets risky; eat food or go to bed. Foraged items like Leek, Daffodil, Dandelion, Wild Horseradish can be eaten or sold.
 - Rain waters crops for you.
 - At skill level 5 and 10 you choose a profession. It is permanent and changes what pays off (e.g. Farming 5: Rancher for animals vs Tiller +10% crop prices). The choice shows in `status`; read both options and call `choose_profession` before bed, or the left option is picked for you.
+- Looks: `wardrobe` shows what you wear; `wear(item)` puts on a hat, shirt or pants. Villagers can see you dig in trash cans (`search_trash`): you lose friendship if they do, and viewers see who watched.
+- A horse (needs a Stable) is faster than walking: `mount` / `dismount`. Night events (fairy, witch, meteorite...) are reported as an `Overnight:` line in your next results.
 
 # Memory
 Your diaries from previous days are below. Use them to continue your plans.

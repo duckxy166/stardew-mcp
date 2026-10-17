@@ -74,7 +74,7 @@ Rules:
 | Backpack upgrade | `BuyBackpack` tile → `Backpack_Purchase` | `interact` + `respond` | 🟡 untested | #2 (plan is wrong) |
 | Totems, books | action button while holding the item (`performUseAction`) | `interact(holding)` without a tile | ✅ totems (smoke `totem`); 🟡 books untested | |
 | Animal care | pet (action), milk/shear (tool), hay (hopper) | `interact`, `use_tool` | 🟡 | #10 |
-| Horse | stable, name, mount (action) | `interact` | 🟡 riding untested | #10 |
+| Horse | stable, name, mount (action) | `interact`, `mount`, `dismount` (horse `checkAction`) | 🟡 riding untested; smoke `mount` self-skips without a horse | #10, #54 |
 
 ### Shops, crafting, upgrades
 
@@ -88,9 +88,9 @@ Rules:
 | Cooking | `kitchen` tile → `CraftingPage` (cooking) | `menu craft` | ❌ | #14 |
 | Buildings, house upgrade, renovation | `Carpenter` → `carpenter_*` → `CarpenterMenu`, `RenovateMenu` | menu adapter | ❌ | #10 |
 | Buy animals | `AnimalShop` → `Marnie_Purchase` → `PurchaseAnimalsMenu` → `NamingMenu` | menu adapter | ❌ | #10 |
-| Rings, boots, hats, clothes | equipment slots in `InventoryPage` | menu adapter | ❌ | #27 |
+| Rings, boots, hats, clothes | equipment slots in `InventoryPage` | rings/boots #27; hats, shirts, pants: `wear`, `wardrobe` | 🟡 untested; smoke `wear` | #27, #54 |
 | Tailoring, dye, forge | `Tailoring`, `DyePot`, `Forge` tiles | menu adapter | ❌ | |
-| Trash cans | `Garbage` tile | `interact` | 🟡 untested | #14 |
+| Trash cans | `Garbage` tile | `search_trash` (presses the tile; `trash_dive` event with `seen_by`) | 🟡 smoke `search_trash` | #14, #54 |
 
 ### People
 
@@ -119,7 +119,7 @@ Rules:
 | Mine elevator | `MineElevator` → `MineElevatorMenu` | `menu choose` | ✅ smoke `mine_elevator` | #2 |
 | Combat | weapon swings, aim | fight driver | ❌ | #5, #6 |
 | Festivals | arrive on time → ready check `festivalStart` → actions, shops, games | travel + primitives + game drivers | ❌ | #11 |
-| Night events: fairy, witch, meteorite, Qi plane | automatic | | 🟡 they play by themselves | |
+| Night events: fairy, witch, meteorite, Qi plane | automatic (`Game1.farmEvent`) | `NightEvents` reports them as an `Overnight:` line and a `night_event` log entry | 🟡 random, no smoke case | #54 |
 | Arcade, casino, darts, crane | `IMinigame`, `CalicoJack`, `Slots` | drivers (optional) | ❌ | |
 | Desert, Skull Cavern, Ginger Island, movie theater, Qi | travel, tile actions, menus | primitives | ❌ not checked | |
 

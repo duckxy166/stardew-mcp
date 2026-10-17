@@ -476,6 +476,50 @@ def question_options() -> dict[str, int]:
     return {m.group(2).strip(): int(m.group(1)) for m in re.finditer(r"option (\d+): (.+)", ok("status"))}
 
 
+@case("wear")
+def wear():
+    """#54: wear puts a hat on from the inventory and gives the old one back; wardrobe shows it."""
+    reset("Farm")
+    try:
+        debug("add_item", id="(H)0", qty=1)  # Cowboy Hat
+    except Smoke as e:
+        raise SkipCase(f"could not add a hat through the debug API: {e}")
+    text = ok("wear", item="Cowboy Hat", reason="smoke test")
+    if "put on" not in text or "Cowboy Hat" not in ok("wardrobe"):
+        raise Smoke(f"the hat was not worn: {text.splitlines()[0]}")
+
+
+@case("search_trash")
+def search_trash():
+    """#54: search_trash presses the Garbage tile; the result says who reacted (a trash_dive event is logged)."""
+    reset("Farm")
+    ok("travel_to", location="Town", reason="smoke test")
+    good, text = call("search_trash", reason="smoke test")
+    if not good:
+        raise SkipCase(f"no reachable trash can: {text.splitlines()[0]}")
+    if "trash can" not in text or ("saw you" not in text and "No villager reacted" not in text):
+        raise Smoke(f"unexpected search_trash result: {text.splitlines()[0]}")
+
+
+@case("mount")
+def mount():
+    """#54: mount with a horse gets on, dismount gets off; without a stable it says so."""
+    reset("Farm")
+    good, text = call("mount", reason="smoke test")
+    if not good:
+        if "no horse" in text.lower() or "Stable" in text:
+            raise SkipCase("this save has no horse (build a Stable with #10 first)")
+        raise Smoke(f"mount failed: {text.splitlines()[0]}")
+    if "riding" not in text and "naming" not in text:
+        raise Smoke(f"mount gave: {text.splitlines()[0]}")
+    ok("dismount", reason="smoke test")
+
+
+@case("night_events", skip="night events are random and play while asleep; check the next morning's go_to_bed result for an 'Overnight:' line")
+def night_events():
+    pass
+
+
 @case("totem")
 def totem():
     """interact(holding) with no tile uses the item where you stand (performUseAction): a Warp Totem: Farm."""

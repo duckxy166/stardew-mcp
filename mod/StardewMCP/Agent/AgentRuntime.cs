@@ -87,6 +87,7 @@ public class AgentRuntime
         _globalTicks++;
         AutoHandleOverlays();
         SocialTools.Tick(Log.Player);
+        NightEvents.Tick(this);
         _actionLane.Tick(_actions);
         _observeLane.Tick(_observations);
     }
