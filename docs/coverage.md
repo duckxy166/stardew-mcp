@@ -59,9 +59,10 @@ Rules:
 
 | System | How a human does it | Covered by | Status | Issue |
 |---|---|---|---|---|
-| Clear, till, water, chop, mine | tool on a tile | `use_tool` | ✅ | #15 (batches) |
-| Plant seeds, fertilizer | item on soil | `plant` | ✅ | |
-| Harvest crops, forage | action on a tile | `harvest` | ✅ | |
+| Clear, till, water, chop, mine | tool on a tile | `use_tool`; `clear_area`, `till_area` for rectangles | ✅ single tiles; 🟡 `clear_area`/`till_area` untested (smoke `farm_batch`) | #15 |
+| Plant seeds, fertilizer | item on soil | `plant` (tiles, or `area`/whole map) | ✅ tiles; 🟡 area mode untested (smoke `farm_batch`) | #15 |
+| Harvest crops, forage | action on a tile | `harvest`; `harvest_all` for the whole map | ✅ tiles; 🟡 `harvest_all` untested | #15 |
+| Whole-farm routine | look at every plot, water, collect | `farm_summary`, `water_all`, `harvest_all` | 🟡 untested (smoke `farm_batch` covers summary and water; refill and rain need manual play) | #15 |
 | Place machines, chests, sprinklers, fences, furniture | use button with the item | `place` | ❌ | #3 |
 | Load a machine | action while holding the input | `interact(holding)` | ✅ smoke `furnace` | #3 |
 | Collect from a machine | action | `interact` | ✅ smoke `furnace` | #3 |

@@ -351,6 +351,54 @@ def travel():
         raise Smoke(f"expected arrival on Farm, got: {text.splitlines()[0]}")
 
 
+@case("farm_batch")
+def farm_batch():
+    """till_area -> farm_summary -> plant(area) -> farm_summary -> water_all, on three fresh tiles."""
+    if fresh_state().get("weather") in ("rain", "storm"):
+        raise SkipCase("rain waters new crops by itself; run this case on a dry day")
+    reset("Farm")
+    debug("add_item", id="(O)472", qty=9)  # Parsnip Seeds
+
+    def summary_count(text: str, label: str) -> int:
+        m = re.search(rf"^{re.escape(label)}: (\d+)", text, re.MULTILINE)
+        if not m:
+            raise Smoke(f"farm_summary has no '{label}' line: {text[:200]}")
+        return int(m.group(1))
+
+    runs = parse_tillable_runs(ok("look", radius=10), 3)
+    if not runs:
+        raise Smoke("no run of 3 tillable tiles near the farm entrance")
+    x, y = runs[0][0]
+
+    first = ok("farm_summary")
+    if "Farm summary of Farm" not in first:
+        raise Smoke(f"unexpected farm_summary header: {first.splitlines()[0]}")
+    soil, dry = summary_count(first, "Empty tilled soil"), summary_count(first, "Unwatered crops")
+
+    text = ok("till_area", x=x, y=y, w=3, h=1, reason="smoke test")
+    m = re.search(r"Tilled (\d+) of (\d+) tiles", text)
+    if not m or m.group(1) != "3" or m.group(2) != "3":
+        raise Smoke(f"expected 3 of 3 tiles tilled, got: {text.splitlines()[0]}")
+    if summary_count(ok("farm_summary"), "Empty tilled soil") != soil + 3:
+        raise Smoke("farm_summary did not count the 3 newly tilled tiles as empty soil")
+
+    text = ok("plant", item="Parsnip Seeds", area=[x, y, 3, 1], reason="smoke test")
+    if "Planted 3 " not in text:
+        raise Smoke(f"expected 3 seeds planted in the area, got: {text.splitlines()[0]}")
+    after_plant = ok("farm_summary")
+    if summary_count(after_plant, "Empty tilled soil") != soil:
+        raise Smoke("planted tiles still counted as empty soil")
+    if summary_count(after_plant, "Unwatered crops") != dry + 3:
+        raise Smoke("farm_summary did not count the 3 new crops as unwatered")
+
+    text = ok("water_all", reason="smoke test")
+    m = re.search(r"Watered (\d+) of (\d+) crops", text)
+    if not m or m.group(1) != m.group(2) or int(m.group(1)) < 3 or "partial=false" not in text:
+        raise Smoke(f"expected every dry crop watered, got: {text.splitlines()[0]}")
+    if summary_count(ok("farm_summary"), "Unwatered crops") != 0:
+        raise Smoke("crops are still unwatered after water_all")
+
+
 @case("shop_buy")
 def shop_buy():
     if fresh_state().get("dayOfMonth", 0) % 7 == 3:

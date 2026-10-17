@@ -22,6 +22,12 @@ public class ModConfig
     public string ThoughtLanguage { get; set; } = "Thai";
 
     /// <summary>
+    /// water_all, clear_area, till_area (and the Scythe pass of harvest_all) stop when energy drops below this, instead of
+    /// working until the farmer is exhausted. They never eat; the AI decides.
+    /// </summary>
+    public int FarmBatchMinEnergy { get; set; } = 10;
+
+    /// <summary>
     /// Three-AI split-screen: after the save loads, join P2–P4 as local farmhands (needs 3 free
     /// cabins). P1–P3 are AIs on /mcp/p1../mcp/p3, P4 is the video's camera screen.
     /// </summary>

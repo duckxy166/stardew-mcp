@@ -51,6 +51,9 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `status`, `look`, `inventory` | Read the player, surroundings and items |
 | `think` | Post a thought (shown on the overlay, costs no game time) |
 | `walk_to`, `travel_to` | Pathfind to a tile, or to another location |
+| `farm_summary` | Whole-map farm report: empty tilled soil, crops by type with days to harvest, unwatered, ready and dead crops, crops that won't mature this season, forage, debris, watering can and nearest water. Costs no game time |
+| `water_all`, `harvest_all` | Water every dry crop (refills at the nearest water, stops on low energy) and collect every ready crop and forage item. Both stop with a reason (low energy, menu, late hour, full inventory) and say what is left |
+| `clear_area`, `till_area` | Clear a rectangle (up to 100 tiles) with the right tool, and till it with the Hoe; large stumps and boulders are skipped and reported. `plant` also takes `area: [x, y, w, h]` (or no tiles at all = every empty tilled tile on the map) |
 | `use_tool`, `plant`, `harvest` | Farm work on a target tile |
 | `fight` | Fight the monsters near you: equips the best weapon, walks to the nearest one and swings for a few seconds; stops when all clear, health is at 30% of max (at least 15) or a menu opens; `eat_below` (HP %) eats the best healing food on the way |
 | `leave_mine` | Get out of the Mines from any floor: climbs the up ladders, or warps to the Mine entrance when health is low, it is 11 PM or the ladder cannot be reached. In the mines the footer shows HP, and any other long action is cut short with `Interrupted:` when a monster within 3 tiles hurts you |
@@ -83,6 +86,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `FreezeTimeWhileThinking` | `true` | Stop the clock while no action is running |
 | `LogDir` | `""` | Log folder; empty = `logs/` in the mod folder |
 | `AutoLoadSave` | `""` | Save folder to load automatically from the title screen |
+| `FarmBatchMinEnergy` | `10` | `water_all`, `harvest_all`, `clear_area`, `till_area` and `plant` area mode stop when energy drops below this (0 = only stop at 0) |
 | `EnableDebugApi` | `false` | Serve `/api/debug/*` test hooks for `runner/smoke.py`; leave off for normal play |
 | `ThoughtLanguage` | `"Thai"` | Language the AI is asked to use for on-screen text (`think`, action reasons, journal), e.g. `"English"` |
 | `SplitScreen` | `false` | Three AIs + a camera screen in split-screen co-op (see below) |

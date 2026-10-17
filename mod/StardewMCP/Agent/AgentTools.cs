@@ -187,9 +187,16 @@ public static partial class AgentTools
             new()
             {
                 Name = "plant",
-                Description = "Plant seeds (or apply fertilizer) on tilled soil tiles (=). You walk to each tile automatically.",
-                Schema = Obj(new { item = Str("Seed/fertilizer name, e.g. \"Parsnip Seeds\""), tiles = Tiles("List of [x,y] tilled tiles, max 40"), reason = Str(ReasonDesc) }, "item", "tiles", "reason"),
-                Run = Plant
+                Description = "Plant seeds (or apply fertilizer) on tilled soil tiles (=). You walk to each tile automatically. " +
+                              "Give tiles, or area [x,y,w,h] to fill the empty tilled soil inside it, or neither to fill every empty tilled tile on the map until the seeds run out.",
+                Schema = Obj(new
+                {
+                    item = Str("Seed/fertilizer name, e.g. \"Parsnip Seeds\""),
+                    tiles = Tiles("List of [x,y] tilled tiles, max 40"),
+                    area = new { type = "array", description = "Alternative to tiles: rectangle [x, y, w, h], x,y = top-left tile", items = new { type = "integer" }, minItems = 4, maxItems = 4 },
+                    reason = Str(ReasonDesc)
+                }, "item", "reason"),
+                Run = PlantTool
             },
             new()
             {
@@ -198,6 +205,7 @@ public static partial class AgentTools
                 Schema = Obj(new { tiles = Tiles("List of [x,y] tiles, max 40"), reason = Str(ReasonDesc) }, "tiles", "reason"),
                 Run = Harvest
             },
+            FarmSummaryTool(), WaterAllTool(), HarvestAllTool(), ClearAreaTool(), TillAreaTool(), // FarmTools.cs
             new()
             {
                 Name = "interact",
@@ -529,7 +537,7 @@ public static partial class AgentTools
         var lines = new List<string>();
         var loc = Loc;
 
-        foreach (var t in tiles)
+        foreach (var t in FarmRoute(tiles, tool))
         {
             if (P.Stamina <= 2)
             {
@@ -597,7 +605,7 @@ public static partial class AgentTools
     private static IEnumerator Plant(JsonElement a, CallContext c)
     {
         var name = S(a, "item");
-        var tiles = TileList(a, "tiles").Take(40).ToList();
+        var tiles = RouteOrder(TileList(a, "tiles").Take(40), P.TilePoint);
         int slot = FindItem(name, it => it is SObject);
         if (slot < 0) { c.Fail($"No \"{name}\" in inventory."); yield break; }
         var loc = Loc;
@@ -631,7 +639,7 @@ public static partial class AgentTools
 
     private static IEnumerator Harvest(JsonElement a, CallContext c)
     {
-        var tiles = TileList(a, "tiles").Take(40).ToList();
+        var tiles = RouteOrder(TileList(a, "tiles").Take(40), P.TilePoint);
         var before = Snapshot();
         var loc = Loc;
         var lines = new List<string>();
