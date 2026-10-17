@@ -33,6 +33,15 @@ public class ModConfig
     /// <summary>Split-screen: an AI that thinks longer than this (seconds) stops holding the world frozen. 0 = never.</summary>
     public int ThinkTimeoutSeconds { get; set; } = 300;
 
+    /// <summary>Loop guard (#31): add a "try something different" hint once the identical call has failed this many times in a row. 0 = off.</summary>
+    public int RepeatHintAfter { get; set; } = 3;
+
+    /// <summary>Loop guard (#31): the Nth identical call in a row is refused without running when the N-1 before it all failed (the 5th by default). 0 = off.</summary>
+    public int RepeatBlockAfter { get; set; } = 5;
+
+    /// <summary>Loop guard (#31): add a "pick an action" hint after this many calls in a row with no game time, inventory or position change. 0 = off.</summary>
+    public int NoProgressAfter { get; set; } = 25;
+
     /// <summary>Split-screen: ignore the real keyboard, mouse and pad on P1 so nobody at the PC moves it or unpauses.</summary>
     public bool LockHostInput { get; set; } = true;
 

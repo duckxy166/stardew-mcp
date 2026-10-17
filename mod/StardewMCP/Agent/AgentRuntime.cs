@@ -56,6 +56,9 @@ public class AgentRuntime
     public ModConfig Config { get; }
     public IModHelper Helper { get; }
 
+    /// <summary>Stuck/loop detector for this seat's calls: repeated failures, no progress. Hints per day: <c>Guard.HintsToday</c>. See LoopGuard.cs.</summary>
+    public LoopGuard Guard { get; }
+
     /// <summary>True while an action that lets game time pass is running.</summary>
     public bool ActionRunning => _actionLane.Current is { Instant: false };
     public string? CurrentTool => _actionLane.Current?.Tool.Name;
@@ -73,6 +76,8 @@ public class AgentRuntime
         Log = log;
         _actionLane = new Lane(this, pausable: true);
         _observeLane = new Lane(this, pausable: false);
+
+        Guard = new LoopGuard(config, log, monitor);
     }
 
     /// <summary>
@@ -195,6 +200,15 @@ public class AgentRuntime
                     Finish();
                     return;
                 }
+
+                // Loop guard: the same call already failed again and again, so don't run it a fifth time.
+                if (_rt.Guard.Refuse(call, out var refusal))
+                {
+                    _ctx.Fail(refusal);
+                    Finish();
+                    return;
+                }
+
                 _stack.Push(call.Tool.Run(call.Args, _ctx));
             }
             catch (Exception ex)
@@ -272,6 +286,11 @@ public class AgentRuntime
             _ctx = null;
 
             var text = ctx.Result;
+
+            // Loop guard: "you tried this 3 times", "you haven't done anything for a while".
+            var hint = _rt.Guard.End(call, ctx.Ok, ctx.Result);
+            if (hint.Length > 0) text = text.TrimEnd() + "\n" + hint;
+
             var mail = call.Tool.Mail ? SocialTools.TakeMail(_rt.Log.Player) : "";
             if (mail.Length > 0) text = text.TrimEnd() + "\n" + mail;
             if (call.Tool.AppendStatus && Context.IsWorldReady)

@@ -340,6 +340,63 @@ def observe_tools():
     ok("think", text="smoke test")
 
 
+def guard_notes(tool: str) -> list[dict]:
+    """The loop guard's "guard" lines for one tool, player p1, from the viewers' feed."""
+    return [e for e in _request("/api/feed")["entries"]
+            if e.get("kind") == "guard" and e.get("tool") == tool and e.get("player") == "p1"]
+
+
+@case("loop_guard_repeat")
+def loop_guard_repeat():
+    """#31: the same failing call gets a hint on the 3rd try and is refused without running on the 5th."""
+    reset("Farm")
+    call("close_menu")  # no shop or menu is open, so `buy` fails the same way every time; this call also ends any earlier streak
+    results = []
+    for i in range(1, 6):
+        # the AI's `reason` differs on every call: it must not make the calls look different
+        good, text = call("buy", item="Parsnip Seeds", quantity=1, reason=f"smoke test {i}")
+        if good:
+            raise Smoke(f"buy #{i} succeeded with no shop open: {text.splitlines()[0]}")
+        results.append(text)
+    for i in (0, 1):
+        if "You tried this" in results[i] or results[i].startswith("Not run"):
+            raise Smoke(f"buy #{i + 1} should fail plainly, got: {results[i].splitlines()[0]}")
+    for i, n in ((2, 3), (3, 4)):
+        if f"You tried this {n} times and it failed each time: No shop is open" not in results[i]:
+            raise Smoke(f"buy #{i + 1} lacks the repeat hint for {n} tries:\n{results[i]}")
+    if not results[4].startswith("Not run (repeated failure): You tried this 4 times"):
+        raise Smoke(f"buy #5 should be refused without running, got:\n{results[4]}")
+
+    types = [(n.get("args") or {}).get("type") for n in guard_notes("buy")[-3:]]
+    if types != ["repeat", "repeat", "refused"]:
+        raise Smoke(f"expected guard log lines repeat, repeat, refused for buy, got {types}")
+
+    ok("close_menu")  # any other call that ran ends the streak, so the same call may be tried again
+    good, text = call("buy", item="Parsnip Seeds", quantity=1, reason="smoke test after another call")
+    if good or "You tried this" in text or text.startswith("Not run"):
+        raise Smoke(f"buy after another call should fail plainly again, got: {text.splitlines()[0]}")
+
+
+@case("loop_guard_idle")
+def loop_guard_idle():
+    """#31: calls that only observe, with the clock frozen, get the no-progress hint (the 25th by default)."""
+    reset("Farm")
+    ok("close_menu")  # a successful action resets the no-progress counter
+    if not fresh_state().get("frozen"):
+        raise SkipCase('the clock is not frozen while the AI thinks: set "FreezeTimeWhileThinking": true in config.json')
+    hinted = 0
+    for i in range(1, 31):
+        if "You haven't done anything for a while" in ok("look", radius=5):
+            hinted = i
+            break
+    if not hinted:
+        raise Smoke("30 look calls in a row got no no-progress hint")
+    if hinted < 20:
+        raise Smoke(f"the no-progress hint came too early, after {hinted} looks")
+    if not any((n.get("args") or {}).get("type") == "no_progress" for n in guard_notes("look")):
+        raise Smoke("the no-progress hint is not in the guard log")
+
+
 @case("travel")
 def travel():
     reset("Farm")
