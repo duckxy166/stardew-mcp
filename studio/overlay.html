@@ -19,6 +19,7 @@
   html, body { margin: 0; background: transparent; overflow: hidden; }
   body { width: 1920px; height: 1080px; position: relative; font-family: "Mitr", "Leelawadee UI", "Tahoma", sans-serif; color: var(--text); }
   .hide { display: none !important; }
+  body:not(.i18n) { visibility: hidden; } /* nothing shows until the language is known (no flash of the wrong one) */
 
   .panel { box-sizing: border-box; padding: 14px 18px; background: var(--panel); border: 1px solid var(--edge);
            border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35); }
@@ -100,53 +101,53 @@
 <body>
   <div id="status" class="panel">
     <div class="line1">
-      <span>วันที่ <span id="day">–</span><span class="muted">/100</span></span>
+      <span><span data-i18n="dayWord"></span> <span id="day">–</span><span class="muted">/100</span></span>
       <span class="muted">·</span>
       <span class="place" id="place">–</span>
     </div>
-    <div class="line2"><span class="dot" id="modeDot"></span><span id="modeText">รอเกม…</span></div>
+    <div class="line2"><span class="dot" id="modeDot"></span><span id="modeText" data-i18n="waiting"></span></div>
   </div>
 
   <div id="col">
     <div id="replyPanel" class="panel">
-      <div class="label" id="replyLabel">REPLY</div>
+      <div class="label" id="replyLabel" data-i18n="labelReply"></div>
       <div class="textwrap"><div id="replyText">…</div></div>
     </div>
 
     <div id="logPanel" class="panel">
-      <div class="label">LOG</div>
+      <div class="label" data-i18n="labelLog"></div>
       <div id="hist"></div>
       <div id="proof"></div>
     </div>
 
     <div id="actPanel" class="panel">
-      <div class="label">ACTION</div>
-      <div id="actLine">ทำ: ?</div>
+      <div class="label" data-i18n="labelAction"></div>
+      <div id="actLine" data-i18n="actIdle"></div>
     </div>
 
     <div id="thinkPanel" class="panel">
-      <div class="label">MODEL THINKING</div>
+      <div class="label" data-i18n="labelThinking"></div>
       <div class="textwrap"><div id="thinkText">…</div></div>
     </div>
   </div>
 
   <div id="daycard" class="scrim"><div class="card parch">
     <div class="season" id="dcSeason"></div>
-    <div class="big"><span class="w">วันที่</span><span class="num" id="dcDay"></span><span class="of">/ 100</span></div>
+    <div class="big"><span class="w" data-i18n="dayWord"></span><span class="num" id="dcDay"></span><span class="of">/ 100</span></div>
     <div id="cells"></div>
     <div class="stats">
-      <div class="stat"><span>เงินเมื่อวาน</span><span id="dcMoney">–</span></div>
-      <div class="stat"><span>ทำสำเร็จ</span><span id="dcOk" style="color:#2F6B22">–</span></div>
-      <div class="stat"><span>พลาด</span><span id="dcBad" style="color:#A82A20">–</span></div>
+      <div class="stat"><span data-i18n="statMoney"></span><span id="dcMoney">–</span></div>
+      <div class="stat"><span data-i18n="statOk"></span><span id="dcOk" style="color:#2F6B22">–</span></div>
+      <div class="stat"><span data-i18n="statBad"></span><span id="dcBad" style="color:#A82A20">–</span></div>
     </div>
   </div></div>
 
   <div id="diary" class="scrim"><div class="card parch">
     <div class="head">
-      <div class="title"><span id="dyTitle">บันทึก</span><span id="dySub"></span></div>
+      <div class="title"><span id="dyTitle" data-i18n="diaryWord"></span><span id="dySub"></span></div>
       <div class="badge">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
-        เข้านอนแล้ว
+        <span data-i18n="inBed"></span>
       </div>
     </div>
     <div class="rule"></div>
@@ -155,60 +156,163 @@
   </div></div>
 
 <script>
-const SEASON = { spring: "ฤดูใบไม้ผลิ", summer: "ฤดูร้อน", fall: "ฤดูใบไม้ร่วง", winter: "ฤดูหนาว" };
-// Thai verb for the ACTION line
-const TOOL = {
-  walk_to: "เดิน", use_tool: "ใช้เครื่องมือ", plant: "ปลูก", harvest: "เก็บเกี่ยว", interact: "กดใช้",
-  talk_to: "คุย", travel_to: "เดินทาง", buy: "ซื้อ", ship: "ส่งขาย", eat: "กิน", wait: "รอเวลา",
-  go_to_bed: "เข้านอน", respond: "ตอบ", close_menu: "ปิดเมนู", shop_list: "ดูของในร้าน"
+// ====== i18n:begin ======================================================================================
+// Every viewer-facing string of this page. The mod reports ThoughtLanguage in /api/feed (`thoughtLanguage`);
+// ?lang=Thai|English overrides it. `en` is the complete base table; the other tables only list what differs,
+// and a missing key falls back to `en`. To add a language: add a table under its code (ja, ...) and, when its
+// ThoughtLanguage name differs from the code, a LANG_NAMES entry. A language without a table shows `en`.
+const LANG_NAMES = { thai: "th", english: "en" };
+const I18N = {
+  en: {
+    waiting: "Waiting for game…",
+    dayWord: "Day", diaryWord: "Diary",
+    labelReply: "REPLY", labelLog: "LOG", labelAction: "ACTION", labelThinking: "MODEL THINKING",
+    replyTo: who => `REPLY TO ${who}`,
+    liveWord: "LIVE", sessionWord: "session", seqWord: "seq",
+    // ACTION line
+    actIdle: "Now: ?", actReplyIdle: "Reply: ?", actThinking: "Thinking…",
+    actDoing: verb => `Now: ${verb}`,
+    actResult: (ok, line) => `Result: ${ok ? "✓" : "✗"} ${line}`,
+    // top-left status line
+    modeRunning: "Time running",
+    modeRunningAction: verb => `Time running · ${verb}…`,
+    modeFrozenTalk: who => `Time frozen · talking to ${who}`,
+    modeFrozenThink: who => `Time frozen · ${who} is thinking`,
+    // day card and diary card
+    statMoney: "Money yesterday", statOk: "Succeeded", statBad: "Failed", inBed: "In bed",
+    dayCardSeason: (season, dom, year) => `${season} ${dom} · Year ${year}`,
+    diarySub: (day, season, dom, year) => `Night of day ${day} · ${season} ${dom} · Year ${year}`,
+    diaryTitle: who => `${who}'s diary`,
+    // result lines
+    optionN: n => `option ${n}`, optionNext: "continue",
+    resultDone: "done", resultFailed: "failed",
+    stoppedShort: (x, y) => `Stopped short at (${x},${y})`,
+    results: [],            // no rewriting: the mod's own (English) result line is shown, shortened
+    season: { spring: "Spring", summer: "Summer", fall: "Fall", winter: "Winter" },
+    // action verb for the ACTION line and the status line
+    tool: {
+      walk_to: "walking", use_tool: "using a tool", plant: "planting", harvest: "harvesting", interact: "interacting",
+      talk_to: "talking", travel_to: "traveling", buy: "buying", ship: "shipping", eat: "eating", wait: "waiting",
+      go_to_bed: "going to bed", respond: "replying", close_menu: "closing the menu", shop_list: "browsing the shop"
+    },
+    // short terminal-style name for the LOG column
+    toolLog: {
+      walk_to: "move", use_tool: "tool", plant: "plant", harvest: "harvest", interact: "use",
+      talk_to: "talk", travel_to: "travel", buy: "buy", ship: "ship", eat: "eat", wait: "wait",
+      go_to_bed: "sleep", respond: "reply", close_menu: "close", shop_list: "shop"
+    },
+    place: {
+      FarmHouse: "Farmhouse", Farm: "Farm", BusStop: "Bus Stop", Town: "Town", SeedShop: "Pierre's shop",
+      Beach: "Beach", Mountain: "Mountain", Forest: "Forest", Saloon: "Saloon", Blacksmith: "Blacksmith",
+      AnimalShop: "Marnie's ranch", ScienceHouse: "Robin's house", Mine: "Mines", Hospital: "Clinic", JojaMart: "Joja Mart",
+      ArchaeologyHouse: "Museum", Woods: "Secret Woods", CommunityCenter: "Community Center", FishShop: "Willy's shop"
+    },
+    // demo feed (?mock=1): what the model "says", so it should read like ThoughtLanguage
+    mock: {
+      plan: "Day 1, spring. I have 500g and full energy. The plan is to look over the land, clear the grass, stumps and rocks, then till and plant my 15 parsnip seeds, after finding the way out through the bottom door at (3,11)",
+      walkDoor: "Walk toward the door out of the house", walkOut: "Step out of the door and head down",
+      goFarm: "Head out to the farm", greet: "[sample] Say hi to Pierre",
+      thinkReply: "[sample] Haiku's thoughts on how to answer Pierre", replyPolite: "[sample] Pick the polite answer",
+      goBed: "[sample] Go home to bed", diary: "[sample] Tonight's diary entry"
+    }
+  },
+  th: {
+    waiting: "รอเกม…",
+    dayWord: "วันที่", diaryWord: "บันทึก",
+    actIdle: "ทำ: ?", actReplyIdle: "ตอบ: ?", actThinking: "กำลังคิด…",
+    actDoing: verb => `ทำ: ${verb}`,
+    actResult: (ok, line) => `ผล: ${ok ? "✓" : "✗"} ${line}`,
+    modeRunning: "เวลาเดิน",
+    modeRunningAction: verb => `เวลาเดิน · กำลัง${verb}…`,
+    modeFrozenTalk: who => `หยุดเวลา · คุยกับ ${who}`,
+    modeFrozenThink: who => `หยุดเวลา · ${who} กำลังคิด`,
+    statMoney: "เงินเมื่อวาน", statOk: "ทำสำเร็จ", statBad: "พลาด", inBed: "เข้านอนแล้ว",
+    dayCardSeason: (season, dom, year) => `${season} วันที่ ${dom} · ปี ${year}`,
+    diarySub: (day, season, dom, year) => `คืนวันที่ ${day} · ${season} ${dom} · ปี ${year}`,
+    diaryTitle: who => `บันทึกของ ${who}`,
+    optionN: n => `ข้อ ${n}`, optionNext: "กดคุยต่อ",
+    resultDone: "สำเร็จ", resultFailed: "ไม่สำเร็จ",
+    stoppedShort: (x, y) => `ไปไม่ถึง หยุดที่ (${x},${y})`,
+    // English mod results -> short Thai for viewers
+    results: [
+      [/^No known route from (\w+) to (\w+)/, (m) => `ไม่รู้ทางจาก${place(m[1])}ไป${place(m[2])}`],
+      [/^Arrived in (\w+)/, (m) => `ถึง${place(m[1])}แล้ว`],
+      [/^Arrived at \((\d+),\s*(\d+)\)/, (m) => `ถึง (${m[1]},${m[2]})`],
+      [/^No walkable path/, () => "เดินไปไม่ได้"],
+      [/^Interacted with/, () => "กดแล้ว"],
+      [/^Menu closed|^No menu open/, () => "ปิดเมนูแล้ว"],
+      [/^Talking to (.+?) \(friendship (\d+)/, (m) => `เริ่มคุยกับ ${m[1]} (หัวใจ ${m[2]})`],
+      [/^Dialogue closed/, () => "คุยจบ"],
+      [/^Dialogue continued/, () => "คุยต่อ"],
+      [/^This is a question/, () => "ต้องเลือกข้อก่อน"],
+      [/^No dialogue is open/, () => "ไม่มีบทสนทนาเปิดอยู่"],
+      [/^Couldn't start a conversation with (\S+)/, (m) => `คุยกับ ${m[1]} ไม่ได้`],
+      [/^(\S+) is not on this map/, (m) => `${m[1]} ไม่อยู่แถวนี้`],
+      [/^Tried to sleep but the day did not change/, () => "นอนแล้วแต่วันไม่เปลี่ยน"],
+      [/^No "(.+?)" in inventory/, (m) => `ไม่มี ${m[1]} ในกระเป๋า`],
+    ],
+    season: { spring: "ฤดูใบไม้ผลิ", summer: "ฤดูร้อน", fall: "ฤดูใบไม้ร่วง", winter: "ฤดูหนาว" },
+    tool: {
+      walk_to: "เดิน", use_tool: "ใช้เครื่องมือ", plant: "ปลูก", harvest: "เก็บเกี่ยว", interact: "กดใช้",
+      talk_to: "คุย", travel_to: "เดินทาง", buy: "ซื้อ", ship: "ส่งขาย", eat: "กิน", wait: "รอเวลา",
+      go_to_bed: "เข้านอน", respond: "ตอบ", close_menu: "ปิดเมนู", shop_list: "ดูของในร้าน"
+    },
+    place: {
+      FarmHouse: "ในบ้าน", Farm: "ฟาร์ม", BusStop: "ป้ายรถเมล์", Town: "ในเมือง", SeedShop: "ร้าน Pierre",
+      Beach: "ชายหาด", Mountain: "ภูเขา", Forest: "ป่า", Saloon: "ร้าน Saloon", Blacksmith: "ร้านตีเหล็ก",
+      AnimalShop: "ร้าน Marnie", ScienceHouse: "บ้าน Robin", Mine: "เหมือง", Hospital: "คลินิก", JojaMart: "Joja Mart",
+      ArchaeologyHouse: "พิพิธภัณฑ์", Woods: "ป่าลึก", CommunityCenter: "ศูนย์ชุมชน", FishShop: "ร้าน Willy"
+    },
+    mock: {
+      plan: "วันที่ 1 ฤดูใบไม้ผลิ มีเงิน 500g และพลังงานเต็ม แผนคือไปดูที่ดิน ถางหญ้า ตอไม้ และก้อนหินให้โล่ง แล้วไถพรวนปลูกพาร์สนิปที่มีอยู่ 15 เมล็ด ก่อนหาทางออกจากบ้านทางประตูล่างที่ (3,11)",
+      walkDoor: "เดินไปทางประตูออกบ้าน", walkOut: "เดินออกจากประตูบ้านลงไปข้างล่าง",
+      goFarm: "ออกไปที่ฟาร์ม", greet: "[ตัวอย่าง] ทักทาย Pierre",
+      thinkReply: "[ตัวอย่าง] ความคิดของ Haiku ว่าจะตอบ Pierre ยังไง", replyPolite: "[ตัวอย่าง] เลือกตอบแบบสุภาพ",
+      goBed: "[ตัวอย่าง] กลับบ้านไปนอน", diary: "[ตัวอย่าง] ไดอารี่ของคืนนั้น"
+    }
+  },
 };
-// short terminal-style name for the LOG column
-const TOOL_EN = {
-  walk_to: "move", use_tool: "tool", plant: "plant", harvest: "harvest", interact: "use",
-  talk_to: "talk", travel_to: "travel", buy: "buy", ship: "ship", eat: "eat", wait: "wait",
-  go_to_bed: "sleep", respond: "reply", close_menu: "close", shop_list: "shop"
-};
-const PLACE = {
-  FarmHouse: "ในบ้าน", Farm: "ฟาร์ม", BusStop: "ป้ายรถเมล์", Town: "ในเมือง", SeedShop: "ร้าน Pierre",
-  Beach: "ชายหาด", Mountain: "ภูเขา", Forest: "ป่า", Saloon: "ร้าน Saloon", Blacksmith: "ร้านตีเหล็ก",
-  AnimalShop: "ร้าน Marnie", ScienceHouse: "บ้าน Robin", Mine: "เหมือง", Hospital: "คลินิก", JojaMart: "Joja Mart",
-  ArchaeologyHouse: "พิพิธภัณฑ์", Woods: "ป่าลึก", CommunityCenter: "ศูนย์ชุมชน", FishShop: "ร้าน Willy"
-};
-const place = n => PLACE[n] || n || "–";
+// "Thai" / "English" / "th" / "en-US" -> a table code; blank = the mod's default (Thai); anything else -> en
+function pickLang(name) {
+  const k = String(name == null ? "" : name).trim().toLowerCase() || "thai";
+  const code = LANG_NAMES[k] || k.split(/[-_]/)[0];
+  return I18N[code] ? code : "en";
+}
+// ====== i18n:end ========================================================================================
+
+let L = null, langKey = null;                // the table in use (null until the language is known)
+const LANG_PARAM = new URLSearchParams(location.search).get("lang");
+const hasOwn = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// string (or function result) from the current table, falling back to `en`
+function t(key, ...a) { const v = L && hasOwn(L, key) ? L[key] : I18N.en[key]; return typeof v === "function" ? v(...a) : v; }
+// one entry of a group table (season, tool, toolLog, place)
+function lk(group, key) { const g = L && L[group]; return g && hasOwn(g, key) ? g[key] : hasOwn(I18N.en[group], key) ? I18N.en[group][key] : undefined; }
+function setLang(name) {
+  const key = pickLang(LANG_PARAM || name);
+  if (key === langKey) return;
+  langKey = key; L = I18N[key];
+  document.documentElement.lang = key;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.body.classList.add("i18n");
+}
+const place = n => lk("place", n) || n || "–";
+const seasonName = n => lk("season", n) || n;
 const C = { plain: "var(--text)", think: "var(--think)", act: "var(--act)", bad: "var(--bad)", dim: "var(--dim)", ok: "var(--ok-mark)" };
 
-// English mod results -> short Thai for viewers
-const RESULT_TH = [
-  [/^No known route from (\w+) to (\w+)/, (m) => `ไม่รู้ทางจาก${place(m[1])}ไป${place(m[2])}`],
-  [/^Arrived in (\w+)/, (m) => `ถึง${place(m[1])}แล้ว`],
-  [/^Arrived at \((\d+),\s*(\d+)\)/, (m) => `ถึง (${m[1]},${m[2]})`],
-  [/^No walkable path/, () => "เดินไปไม่ได้"],
-  [/^Interacted with/, () => "กดแล้ว"],
-  [/^Menu closed|^No menu open/, () => "ปิดเมนูแล้ว"],
-  [/^Talking to (.+?) \(friendship (\d+)/, (m) => `เริ่มคุยกับ ${m[1]} (หัวใจ ${m[2]})`],
-  [/^Dialogue closed/, () => "คุยจบ"],
-  [/^Dialogue continued/, () => "คุยต่อ"],
-  [/^This is a question/, () => "ต้องเลือกข้อก่อน"],
-  [/^No dialogue is open/, () => "ไม่มีบทสนทนาเปิดอยู่"],
-  [/^Couldn't start a conversation with (\S+)/, (m) => `คุยกับ ${m[1]} ไม่ได้`],
-  [/^(\S+) is not on this map/, (m) => `${m[1]} ไม่อยู่แถวนี้`],
-  [/^Tried to sleep but the day did not change/, () => "นอนแล้วแต่วันไม่เปลี่ยน"],
-  [/^No "(.+?)" in inventory/, (m) => `ไม่มี ${m[1]} ในกระเป๋า`],
-];
-function resultTh(text, ok) {
+function resultLine(text, ok) {
   const line = (text || "").split("\n")[0];
-  for (const [re, fn] of RESULT_TH) { const m = line.match(re); if (m) return fn(m); }
-  if (!line) return ok ? "สำเร็จ" : "ไม่สำเร็จ";
+  for (const [re, fn] of t("results")) { const m = line.match(re); if (m) return fn(m); }
+  if (!line) return ok ? t("resultDone") : t("resultFailed");
   return line.length > 38 ? line.slice(0, 36) + "…" : line;
 }
 
-// one result line for an action: ok flag + short Thai
+// one result line for an action: ok flag + short line for viewers
 function judge(tool, args, e) {
-  let ok = e.ok !== false, th = resultTh(e.text, ok);
+  let ok = e.ok !== false, line = resultLine(e.text, ok);
   // asked for one tile, stopped on another: count it as a miss
   const m = (e.text || "").match(/^Arrived at \((\d+),\s*(\d+)\)/);
-  if (tool === "walk_to" && m && args && args.x !== undefined && (+m[1] !== +args.x || +m[2] !== +args.y)) { ok = false; th = `ไปไม่ถึง หยุดที่ (${m[1]},${m[2]})`; }
-  return { ok, th };
+  if (tool === "walk_to" && m && args && args.x !== undefined && (+m[1] !== +args.x || +m[2] !== +args.y)) { ok = false; line = t("stoppedShort", m[1], m[2]); }
+  return { ok, line };
 }
 
 // ✓/✗ counts and start-of-day money from a whole day's log (survives overlay reloads)
@@ -224,7 +328,7 @@ function tally(entries) {
 
 function target(tool, args) {
   args = args || {};
-  if (tool === "respond") return args.option !== undefined && args.option !== null ? `ข้อ ${Number(args.option) + 1}` : "กดคุยต่อ";
+  if (tool === "respond") return args.option !== undefined && args.option !== null ? t("optionN", Number(args.option) + 1) : t("optionNext");
   if (args.location) return "→ " + place(args.location);
   if (args.name) return args.name;
   if (args.item) return args.item;
@@ -291,7 +395,7 @@ function renderLog() {
     const ok = h.result ? h.result.ok : null;
     const mark = ok === null ? "…" : ok ? "✓" : "✗";
     const color = ok === null ? C.dim : ok ? C.ok : "var(--bad-mark)";
-    const tool = TOOL_EN[h.action.tool] || h.action.tool;
+    const tool = lk("toolLog", h.action.tool) || h.action.tool;
     return `<div class="hist"><span class="tool">${esc(tool)}</span><span class="why">${esc(h.action.why || target(h.action.tool, h.action.args))}</span><span class="mark" style="color:${color}">${mark}</span></div>`;
   }).join("");
 }
@@ -299,10 +403,10 @@ function renderLog() {
 function renderAction(frozen, speaker) {
   const a = cur.action, r = cur.result;
   let text, color;
-  if (r) { text = `ผล: ${r.ok ? "✓" : "✗"} ${r.th}`; color = r.ok ? C.ok : C.bad; }
-  else if (a) { text = `ทำ: ${TOOL[a.tool] || a.tool} ${target(a.tool, a.args)}`.trim(); color = C.act; }
-  else if (frozen) { text = "กำลังคิด…"; color = C.think; }
-  else { text = speaker ? "ตอบ: ?" : "ทำ: ?"; color = C.dim; }
+  if (r) { text = t("actResult", r.ok, r.line); color = r.ok ? C.ok : C.bad; }
+  else if (a) { text = `${t("actDoing", lk("tool", a.tool) || a.tool)} ${target(a.tool, a.args)}`.trim(); color = C.act; }
+  else if (frozen) { text = t("actThinking"); color = C.think; }
+  else { text = speaker ? t("actReplyIdle") : t("actIdle"); color = C.dim; }
   const el = $("actLine");
   el.textContent = text; el.style.color = color;
 }
@@ -316,7 +420,7 @@ function clock() {
 async function showDayCard(s) {
   const st = tally(((await fetchDay(s.day - 1)) || {}).entries || []);
   hideDiary();
-  $("dcSeason").textContent = `${SEASON[s.season] || s.season} วันที่ ${s.dayOfMonth} · ปี ${s.year}`;
+  $("dcSeason").textContent = t("dayCardSeason", seasonName(s.season), s.dayOfMonth, s.year);
   $("dcDay").textContent = s.day;
   $("cells").innerHTML = Array.from({ length: 100 }, (_, i) => `<i class="${i + 1 < s.day ? "past" : i + 1 === s.day ? "now" : ""}"></i>`).join("");
   const dm = st.money !== null && typeof s.money === "number" ? s.money - st.money : null;
@@ -337,16 +441,16 @@ function maybeDayCard(s) {
 }
 
 function diarySub(s) {
-  return s && s.ready ? `คืนวันที่ ${s.day} · ${SEASON[s.season] || s.season} ${s.dayOfMonth} · ปี ${s.year}` : "";
+  return s && s.ready ? t("diarySub", s.day, seasonName(s.season), s.dayOfMonth, s.year) : "";
 }
 
 function showDiary(d) {
-  $("dyTitle").textContent = `บันทึกของ ${who()}`;
+  $("dyTitle").textContent = t("diaryTitle", who());
   $("dySub").textContent = d.sub;
   $("dyFoot").textContent = `${meta.modelId || "–"}${meta.session ? " · session " + meta.session.slice(0, 8) : ""}`;
-  const t = $("diaryText");
-  t.textContent = d.text;
-  t.className = d.text.length > 400 ? "longer" : d.text.length > 220 ? "long" : "";
+  const box = $("diaryText");
+  box.textContent = d.text;
+  box.className = d.text.length > 400 ? "longer" : d.text.length > 220 ? "long" : "";
   $("diary").classList.add("show");
   diaryAt = Date.now();
   clearTimeout(diaryTimer);
@@ -357,6 +461,7 @@ function hideDiary() { clearTimeout(diaryTimer); $("diary").classList.remove("sh
 async function poll() {
   try {
     const d = await fetchFeed(after);
+    setLang(d.thoughtLanguage);
     const s = d.state || {};
     meta = d.meta || {};
     if (meta.model) modelShort = meta.model.replace(/^Claude\s+/i, "").trim();
@@ -367,7 +472,7 @@ async function poll() {
     // Boxes with no speaker (sleep prompt, TV, signs) are not conversations.
     const speaker = "dialogue" in s ? (s.dialogue && s.dialogue.speaker) || null : talk;
     document.body.classList.toggle("npc", !!speaker);
-    $("replyLabel").textContent = `REPLY TO ${String(speaker || "NPC").toUpperCase()}`;
+    $("replyLabel").textContent = t("replyTo", String(speaker || "NPC").toUpperCase());
 
     if (s.ready) {
       $("day").textContent = s.day;
@@ -378,39 +483,39 @@ async function poll() {
     }
 
     let mode, color;
-    if (!s.ready) { mode = "รอเกม…"; color = C.dim; }
-    else if (s.action) { mode = `เวลาเดิน · กำลัง${TOOL[s.action] || s.action}…`; color = C.act; }
-    else if (s.frozen) { mode = speaker ? `หยุดเวลา · คุยกับ ${speaker}` : `หยุดเวลา · ${who()} กำลังคิด`; color = C.think; }
-    else { mode = "เวลาเดิน"; color = C.act; }
+    if (!s.ready) { mode = t("waiting"); color = C.dim; }
+    else if (s.action) { mode = t("modeRunningAction", lk("tool", s.action) || s.action); color = C.act; }
+    else if (s.frozen) { mode = speaker ? t("modeFrozenTalk", speaker) : t("modeFrozenThink", who()); color = C.think; }
+    else { mode = t("modeRunning"); color = C.act; }
     $("modeText").textContent = mode;
     $("modeDot").style.background = color;
 
     renderLog();
     renderAction(!!s.frozen && !s.action, speaker);
-    $("proof").innerHTML = `<div><span class="live">●</span> LIVE · ${esc(meta.modelId || "–")}${meta.session ? " · session " + esc(meta.session.slice(0, 8)) : ""}</div>`
-      + `<div>seq ${after} · ${clock()}</div>`;
-  } catch (e) { /* game not running yet */ }
+    $("proof").innerHTML = `<div><span class="live">●</span> ${t("liveWord")} · ${esc(meta.modelId || "–")}${meta.session ? " · " + t("sessionWord") + " " + esc(meta.session.slice(0, 8)) : ""}</div>`
+      + `<div>${t("seqWord")} ${after} · ${clock()}</div>`;
+  } catch (e) { if (!L) setLang(null); /* game not running yet */ }
   setTimeout(poll, 400);
 }
 
 // ?mock=1 replays a short scripted feed so the overlay can be designed without the game
 const MOCK = new URLSearchParams(location.search).has("mock");
-let mockT = 0, mockLog = [], mockState = {};
-const MOCK_SCRIPT = [
-  [{ frozen: true }, { kind: "think", text: "วันที่ 1 ฤดูใบไม้ผลิ มีเงิน 500g และพลังงานเต็ม แผนคือไปดูที่ดิน ถางหญ้า ตอไม้ และก้อนหินให้โล่ง แล้วไถพรวนปลูกพาร์สนิปที่มีอยู่ 15 เมล็ด ก่อนหาทางออกจากบ้านทางประตูล่างที่ (3,11)" }],
-  [{ frozen: true, action: "walk_to" }, { kind: "action", tool: "walk_to", text: "เดินไปทางประตูออกบ้าน", args: { x: 3, y: 10 } }],
+let mockT = 0, mockLog = [], mockState = {}, mockSteps = null;
+const mockScript = M => [
+  [{ frozen: true }, { kind: "think", text: M.plan }],
+  [{ frozen: true, action: "walk_to" }, { kind: "action", tool: "walk_to", text: M.walkDoor, args: { x: 3, y: 10 } }],
   [{ frozen: true, action: null }, { kind: "result", tool: "walk_to", text: "Arrived at (3,10).", ok: true }],
-  [{}, { kind: "action", tool: "walk_to", text: "เดินออกจากประตูบ้านลงไปข้างล่าง", args: { x: 3, y: 12 } }],
+  [{}, { kind: "action", tool: "walk_to", text: M.walkOut, args: { x: 3, y: 12 } }],
   [{}, { kind: "result", tool: "walk_to", text: "Arrived at (3,11).", ok: true }],
-  [{}, { kind: "action", tool: "travel_to", text: "ออกไปที่ฟาร์ม", args: { location: "Farm" } }],
+  [{}, { kind: "action", tool: "travel_to", text: M.goFarm, args: { location: "Farm" } }],
   [{}, { kind: "result", tool: "travel_to", text: "No known route from FarmHouse to Farm.", ok: false }],
-  [{ location: "SeedShop" }, { kind: "action", tool: "talk_to", text: "[ตัวอย่าง] ทักทาย Pierre", args: { name: "Pierre" } }],
+  [{ location: "SeedShop" }, { kind: "action", tool: "talk_to", text: M.greet, args: { name: "Pierre" } }],
   [{ dialogue: { speaker: "Pierre" } }, { kind: "result", tool: "talk_to", text: "Talking to Pierre (friendship 0 hearts).", ok: true }],
-  [{}, { kind: "think", text: "[ตัวอย่าง] ความคิดของ Haiku ว่าจะตอบ Pierre ยังไง" }],
-  [{}, { kind: "action", tool: "respond", text: "[ตัวอย่าง] เลือกตอบแบบสุภาพ", args: { option: 1 } }],
+  [{}, { kind: "think", text: M.thinkReply }],
+  [{}, { kind: "action", tool: "respond", text: M.replyPolite, args: { option: 1 } }],
   [{ dialogue: null }, { kind: "result", tool: "respond", text: "Dialogue closed.", ok: true }],
-  [{ action: "go_to_bed", money: 480 }, { kind: "action", tool: "go_to_bed", text: "[ตัวอย่าง] กลับบ้านไปนอน", args: {} }],
-  [{}, { kind: "diary", text: "[ตัวอย่าง] ไดอารี่ของคืนนั้น" }],
+  [{ action: "go_to_bed", money: 480 }, { kind: "action", tool: "go_to_bed", text: M.goBed, args: {} }],
+  [{}, { kind: "diary", text: M.diary }],
   [{ location: "FarmHouse", dialogue: { speaker: null, question: true } }, { kind: "system", text: "Walking home…" }],
   [{ dialogue: null }, { kind: "system", text: "Sleeping..." }],
   [{ day: 2, dayOfMonth: 2, money: 620 }, { kind: "system", text: "Shipping…" }],
@@ -420,14 +525,15 @@ const MOCK_SCRIPT = [
 const API = (new URLSearchParams(location.search).get("api") || (location.port === "8770" ? "" : "http://localhost:8770")).replace(/\/$/, "");
 async function fetchFeed(after) {
   if (!MOCK) { const r = await fetch(`${API}/api/feed?after=${after}`); return r.json(); }
+  if (!mockSteps) mockSteps = mockScript({ ...I18N.en.mock, ...I18N[pickLang(LANG_PARAM)].mock });
   if (!mockT) mockState = { ready: true, day: 1, season: "spring", dayOfMonth: 1, year: 1, location: "FarmHouse", money: 500, frozen: true, action: null, dialogue: null };
   const i = Math.floor(mockT++ / 10); // one scripted step every ~4 s
-  if (mockT % 10 === 1 && MOCK_SCRIPT[i]) {
-    const [patch, entry] = MOCK_SCRIPT[i];
+  if (mockT % 10 === 1 && mockSteps[i]) {
+    const [patch, entry] = mockSteps[i];
     Object.assign(mockState, patch);
     mockLog.push({ seq: mockLog.length + 1, day: mockState.day, money: mockState.money, ...entry });
   }
-  return { state: mockState, meta: { model: "Claude Haiku 5.5", modelId: "claude-haiku-5-5", session: "mock0000", run: "mock" }, entries: mockLog.filter(e => e.seq > after) };
+  return { state: mockState, thoughtLanguage: LANG_PARAM, meta: { model: "Claude Haiku 5.5", modelId: "claude-haiku-5-5", session: "mock0000", run: "mock" }, entries: mockLog.filter(e => e.seq > after) };
 }
 async function fetchDay(n) {
   try {

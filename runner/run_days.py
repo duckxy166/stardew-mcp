@@ -29,6 +29,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
+import language
+
 HERE = Path(__file__).resolve().parent
 API = "http://localhost:8770"
 DEFAULT_OUT = HERE.parent / "runs"
@@ -188,6 +190,7 @@ def main():
     ap.add_argument("--until-day", type=int, default=0, help="Stop after this farm day number")
     ap.add_argument("--model", default="claude-haiku-5-5")
     ap.add_argument("--goal", default=DEFAULT_GOAL)
+    ap.add_argument("--language", default=None, help="Language of the AI's thoughts, reasons and diary (default: the mod's ThoughtLanguage, else Thai)")
     ap.add_argument("--max-turns", type=int, default=600)
     ap.add_argument("--max-parts", type=int, default=4, help="Sessions per day if Haiku stops before sleeping")
     ap.add_argument("--out", default=str(DEFAULT_OUT))
@@ -205,6 +208,11 @@ def main():
         if subprocess.run([sys.executable, str(HERE / "smoke.py")]).returncode != 0:
             raise SystemExit("Smoke tests failed, not starting the batch. Fix the failing case above, or pass --skip-smoke.")
 
+    ready_state = wait_ready()
+    lang = language.resolve(args.language, ready_state)
+    print(language.describe(lang, ready_state))
+    template = language.fill_prompt(template, lang)
+
     days_played = 0
     while True:
         state = wait_ready()
@@ -217,11 +225,9 @@ def main():
         system_prompt = template.replace("{GOAL}", args.goal).replace("{MEMORY}", recent_diaries(log_dir, day))
         for part in range(1, args.max_parts + 1):
             if part == 1:
-                prompt = (f"วันนี้คือวันที่ {day} ของชาเลนจ์ 100 วัน เริ่มจาก status และ look แล้ว think แผนของวันเป็นภาษาไทย "
-                          "จากนั้นเล่นทั้งวันจนเข้านอนด้วย go_to_bed")
+                prompt = language.first_prompt(lang, day)
             else:
-                prompt = (f"เล่นวันที่ {day} ต่อจากเดิม (session ก่อนหน้าหยุดก่อนเข้านอน) นี่คือสิ่งที่เพิ่งทำไป:\n"
-                          f"{last_actions(log_dir, day)}\n\nเช็ก status แล้วเล่นต่อจนเข้านอนด้วย go_to_bed")
+                prompt = language.continue_prompt(lang, day, last_actions(log_dir, day))
             run_session(args, out_dir, day, prompt, system_prompt, part)
             time.sleep(3)
             s = wait_ready()

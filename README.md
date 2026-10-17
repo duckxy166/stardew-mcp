@@ -78,7 +78,7 @@ Any client that speaks MCP over streamable HTTP can use the same URL.
 | `LogDir` | `""` | Log folder; empty = `logs/` in the mod folder |
 | `AutoLoadSave` | `""` | Save folder to load automatically from the title screen |
 | `EnableDebugApi` | `false` | Serve `/api/debug/*` test hooks for `runner/smoke.py`; leave off for normal play |
-| `ThoughtLanguage` | `"Thai"` | Language the AI is asked to use for on-screen text (`think`, action reasons, diary), e.g. `"English"` |
+| `ThoughtLanguage` | `"Thai"` | Language of the AI's on-screen text (`think`, action reasons, diary); the overlay, replay and `runner/` prompts follow it (see below) |
 | `SplitScreen` | `false` | Three AIs + a camera screen in split-screen co-op (see below) |
 | `FarmhandNames` | `["Gemini","GPT","Camera"]` | Farmhand names for P2, P3, P4; an existing farmhand with that name is reused |
 | `ThinkTimeoutSeconds` | `300` | Split-screen: an AI silent for longer stops holding the world frozen (0 = never) |
@@ -104,15 +104,19 @@ The whole world (clock, farmers, NPCs) is frozen while any connected AI is think
 never loses game time. `/api/state` lists every seat with its current action and thinking time.
 The first time the game starts its local co-op server, Windows Firewall may ask once; allow it.
 
-`ThoughtLanguage` only changes what the MCP tools ask the AI to write. The overlay's own labels and
-`runner/system_prompt.md` are still written for Thai viewers, so edit those too if you switch language.
+`ThoughtLanguage` sets one language for everything viewers read. The MCP tools ask the AI to write in it, the
+overlay and replay pick their labels from it (`thoughtLanguage` in `/api/feed`, and in `/api/state` once a save is
+loaded; `?lang=English` on either page overrides it), and `runner/run_days.py` fills it into the system prompt and
+the daily prompts (`--language` overrides it). `"Thai"` and `"English"` have full UI tables; any other language
+(e.g. `"Japanese"`) gets thoughts in that language with an English UI. To add a table, copy the `en` block in the
+`i18n` section of `studio/overlay.html` and `studio/replay.html`, and add texts to `runner/language.py`.
 
 ## Unattended runs and recording
 
 `runner/` contains Python scripts (standard library only):
 
 - `run_days.py` runs one Claude Code session per in-game day, keeps diaries between days and
-  backs up the save. Example: `py runner/run_days.py --days 3`
+  backs up the save. Example: `py runner/run_days.py --days 3` (add `--language English` to override ThoughtLanguage)
 - `smoke.py` runs LLM-free checks of the tools (farm loop, shop, shipping, sleep) on a copy of your
   save, then reloads your save. `run_days.py` runs it before every batch and stops if a case fails.
   It needs `"EnableDebugApi": true` in `config.json`; see `py runner/smoke.py --list`. The debug
